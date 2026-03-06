@@ -67,6 +67,8 @@ const EMPTY_CURSOR: InventorySlot = {
   blockId: null,
   count: 0,
 };
+const PRIMARY_MINING_HOLD_MS = 120;
+const PRIMARY_PUNCH_LOCK_MS = 0;
 
 export class Game {
   private readonly shell = document.createElement('div');
@@ -98,6 +100,10 @@ export class Game {
   private inventoryMode: CraftingMode = 'player';
   private inventoryCursor: InventorySlot = { ...EMPTY_CURSOR };
   private movementIntensity = 0;
+  private primaryHoldMs = 0;
+  private primaryPunchPending = false;
+  private primaryPunchLockMs = 0;
+  private wasPrimaryDown = false;
   private dropSequence = 0;
   private readonly droppedItems = new Map<string, DroppedItem>();
 
@@ -246,6 +252,10 @@ export class Game {
     this.targetHit = null;
     this.inventoryCursor = { ...EMPTY_CURSOR };
     this.movementIntensity = 0;
+    this.primaryHoldMs = 0;
+    this.primaryPunchPending = false;
+    this.primaryPunchLockMs = 0;
+    this.wasPrimaryDown = false;
     this.dropSequence = 0;
     this.droppedItems.clear();
     this.renderer.clearDroppedItems();
@@ -261,6 +271,7 @@ export class Game {
     this.hud.setVisible(true);
     this.hud.setHandSkin(this.settings.skinDataUrl);
     this.renderer.setPlayerSkin(this.settings.skinDataUrl);
+    this.updateFirstPersonHandVisibility(session.inventory);
     this.hud.updateHotbar(
       session.inventory.getHotbarSlots(),
       session.inventory.getSelectedHotbarIndex(),
@@ -342,15 +353,75 @@ export class Game {
         player.setSelectedSlot(inventory.getSelectedHotbarIndex());
       }
     }
+    this.updateFirstPersonHandVisibility(inventory);
 
     const active =
       this.input.isPointerLocked() && !this.menu.isVisible() && !this.inventoryScreen.isVisible();
     if (active) {
+      this.primaryPunchLockMs = Math.max(0, this.primaryPunchLockMs - dt * 1000);
+      const primaryDown = this.input.isPrimaryDown();
+      const primaryClicked = this.input.consumePrimaryClick();
+
+      if (primaryClicked) {
+        if (!primaryDown) {
+          if (this.primaryPunchLockMs <= 0) {
+            this.primaryPunchLockMs = PRIMARY_PUNCH_LOCK_MS;
+            this.renderer.triggerFirstPersonAction(1.55);
+          }
+          this.primaryPunchPending = false;
+          this.primaryHoldMs = 0;
+        } else {
+          this.primaryPunchPending = true;
+          this.primaryHoldMs = 0;
+        }
+      }
+      if (primaryDown && this.primaryPunchPending) {
+        this.primaryHoldMs += dt * 1000;
+      }
       const before = player.getPosition();
       const frameUpdate = player.update(dt, this.input, world, this.settings.keyBindings);
+      if (frameUpdate.jumped) {
+        this.renderer.triggerFirstPersonJump(0.85);
+      }
       const after = player.getPosition();
       this.trackMovementStats(before, after, dt, frameUpdate);
-      this.handleInteractions(dt);
+      this.targetHit = VoxelRaycaster.cast(
+        world,
+        player.getCameraPosition(),
+        player.getLookDirection(),
+        WORLD_CONFIG.maxInteractionDistance,
+      );
+
+      const holdingMineableTarget =
+        primaryDown &&
+        this.primaryPunchPending &&
+        this.primaryHoldMs >= PRIMARY_MINING_HOLD_MS &&
+        !!this.targetHit &&
+        isMineableBlock(this.targetHit.blockId);
+      if (holdingMineableTarget) {
+        this.primaryPunchPending = false;
+      }
+
+      const releasedPrimary = !primaryDown && this.wasPrimaryDown;
+      if (releasedPrimary) {
+        const shouldPunch = this.primaryPunchPending && this.primaryPunchLockMs <= 0;
+        this.primaryPunchPending = false;
+        this.primaryHoldMs = 0;
+        if (shouldPunch) {
+          this.primaryPunchLockMs = PRIMARY_PUNCH_LOCK_MS;
+          this.renderer.triggerFirstPersonAction(1.55);
+        }
+      }
+
+      const canMineWithPrimary =
+        this.primaryPunchLockMs <= 0 &&
+        primaryDown &&
+        !this.primaryPunchPending &&
+        this.primaryHoldMs >= PRIMARY_MINING_HOLD_MS &&
+        !!this.targetHit &&
+        isMineableBlock(this.targetHit.blockId);
+      this.handleInteractions(dt, canMineWithPrimary);
+      this.wasPrimaryDown = primaryDown;
       this.updateDroppedItems(dt);
       this.hud.updateHand(dt, this.movementIntensity, this.miningProgressMs > 0);
       this.renderer.updateHand(dt, this.movementIntensity, this.miningProgressMs > 0);
@@ -361,6 +432,11 @@ export class Game {
         player.isGrounded(),
       );
     } else {
+      this.input.consumePrimaryClick();
+      this.primaryHoldMs = 0;
+      this.primaryPunchPending = false;
+      this.primaryPunchLockMs = 0;
+      this.wasPrimaryDown = false;
       this.resetMining();
       this.targetHit = null;
       this.renderer.setMiningOverlay(null, 0);
@@ -424,20 +500,18 @@ export class Game {
     this.renderer.render();
   }
 
-  private handleInteractions(dt: number): void {
+  private handleInteractions(dt: number, canUsePrimary: boolean): void {
     if (!this.session) {
       return;
     }
 
     const { world, player, inventory } = this.session;
-    this.targetHit = VoxelRaycaster.cast(
-      world,
-      player.getCameraPosition(),
-      player.getLookDirection(),
-      WORLD_CONFIG.maxInteractionDistance,
-    );
 
-    if (this.targetHit && this.input.isPrimaryDown() && isMineableBlock(this.targetHit.blockId)) {
+    if (
+      canUsePrimary &&
+      this.targetHit &&
+      isMineableBlock(this.targetHit.blockId)
+    ) {
       const targetKey = `${this.targetHit.blockWorldX},${this.targetHit.blockWorldY},${this.targetHit.blockWorldZ}`;
       if (this.miningTargetKey !== targetKey) {
         this.miningTargetKey = targetKey;
@@ -686,6 +760,13 @@ export class Game {
         `MODE: ${this.inventoryScreen.isVisible() ? this.inventoryMode : 'play'}`,
       ].join('\n'),
     );
+  }
+
+  private updateFirstPersonHandVisibility(inventory: Inventory): void {
+    const selectedSlot = inventory.getSlot(inventory.getSelectedAbsoluteSlotIndex());
+    const visible = selectedSlot.blockId === null || selectedSlot.count <= 0;
+    this.renderer.setFirstPersonAnimationPreset(visible ? 'hand' : 'item');
+    this.renderer.setFirstPersonHandVisible(visible);
   }
 
   private createSafePlayerState(candidate: PlayerState, world: World): PlayerState {

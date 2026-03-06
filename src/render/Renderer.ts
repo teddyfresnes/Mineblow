@@ -1,8 +1,10 @@
 import {
   ACESFilmicToneMapping,
+  AmbientLight,
   BoxGeometry,
   BufferGeometry,
   Color,
+  DirectionalLight,
   Fog,
   MeshLambertMaterial,
   MeshBasicMaterial,
@@ -25,10 +27,77 @@ import { TextureAtlas } from './TextureAtlas';
 const BASE_FOV = 75;
 const SPRINT_FOV_BOOST = 4.65;
 const AIRBORNE_SPRINT_FOV_BOOST = 5.45;
+const HAND_BASE_X = 0.98;
+const HAND_BASE_Y = -0.93;
+const HAND_BASE_Z = -0.96;
+const HAND_BASE_ROT_X = -0.28;
+const HAND_BASE_ROT_Y = -0.34;
+const HAND_BASE_ROT_Z = -0.09;
+const HAND_BASE_SCALE = 1.15;
+const HAND_OVERLAY_NEAR = 0.01;
+const HAND_OVERLAY_FAR = 12;
+
+export type FirstPersonAnimationPreset = 'hand' | 'item';
+
+export interface FirstPersonAnimationProfile {
+  bobSpeed: number;
+  walkBobX: number;
+  walkBobY: number;
+  walkBobZ: number;
+  swingDuration: number;
+  swingPitch: number;
+  swingYaw: number;
+  swingRoll: number;
+  swingForward: number;
+  swingRight: number;
+  mineSpeed: number;
+  minePitch: number;
+  mineYaw: number;
+  mineRoll: number;
+  mineForward: number;
+}
+
+const HAND_ANIMATION_PROFILE: FirstPersonAnimationProfile = {
+  bobSpeed: 3.8,
+  walkBobX: 0.036,
+  walkBobY: 0.018,
+  walkBobZ: 0.009,
+  swingDuration: 0.24,
+  swingPitch: 0.62,
+  swingYaw: 0.23,
+  swingRoll: 0.41,
+  swingForward: 0.09,
+  swingRight: 0.11,
+  mineSpeed: 9.2,
+  minePitch: 1.12,
+  mineYaw: 0.36,
+  mineRoll: 0.58,
+  mineForward: 0.16,
+};
+
+const ITEM_ANIMATION_PROFILE: FirstPersonAnimationProfile = {
+  bobSpeed: 3.4,
+  walkBobX: 0.026,
+  walkBobY: 0.014,
+  walkBobZ: 0.007,
+  swingDuration: 0.22,
+  swingPitch: 0.42,
+  swingYaw: 0.18,
+  swingRoll: 0.29,
+  swingForward: 0.065,
+  swingRight: 0.08,
+  mineSpeed: 7.1,
+  minePitch: 0.68,
+  mineYaw: 0.24,
+  mineRoll: 0.31,
+  mineForward: 0.09,
+};
 
 export class Renderer {
   readonly scene = new Scene();
   readonly camera = new PerspectiveCamera(BASE_FOV, 1, 0.1, 500);
+  readonly handScene = new Scene();
+  readonly handCamera = new PerspectiveCamera(BASE_FOV, 1, HAND_OVERLAY_NEAR, HAND_OVERLAY_FAR);
   readonly atlas = new TextureAtlas();
   readonly sky = new SkyDome();
 
@@ -46,6 +115,14 @@ export class Renderer {
   private readonly handRig = new Group();
   private handModel: Group | null = null;
   private handPhase = 0;
+  private miningPhase = 0;
+  private miningBlend = 0;
+  private wasMiningActive = false;
+  private actionTimer = 0;
+  private actionStrength = 0;
+  private jumpTimer = 0;
+  private jumpStrength = 0;
+  private handAnimationProfile: FirstPersonAnimationProfile = { ...HAND_ANIMATION_PROFILE };
   private skinRequestId = 0;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -69,10 +146,16 @@ export class Renderer {
     this.scene.background = new Color(WORLD_CONFIG.skyColor);
     this.scene.fog = new Fog(new Color('#95b9dd'), 60, 190);
     this.scene.add(this.sky.group);
-    this.camera.add(this.handRig);
-    this.handRig.position.set(0.74, -0.86, -0.66);
-    this.handRig.rotation.set(-0.34, 0.22, -0.17);
-    this.handRig.scale.set(1.85, 1.85, 1.85);
+    this.scene.add(this.camera);
+    this.handScene.add(this.handCamera);
+    this.handCamera.add(this.handRig);
+    this.handRig.position.set(HAND_BASE_X, HAND_BASE_Y, HAND_BASE_Z);
+    this.handRig.rotation.set(HAND_BASE_ROT_X, HAND_BASE_ROT_Y, HAND_BASE_ROT_Z);
+    this.handRig.scale.set(HAND_BASE_SCALE, HAND_BASE_SCALE, HAND_BASE_SCALE);
+    const handAmbient = new AmbientLight('#ffffff', 0.6);
+    const handKey = new DirectionalLight('#fff2db', 0.95);
+    handKey.position.set(1.6, 2.2, 2.1);
+    this.handScene.add(handAmbient, handKey);
     this.lights = addSceneLights(this.scene);
     updateSunForCamera(this.lights, 0, 0);
     void this.setPlayerSkin(null);
@@ -94,6 +177,8 @@ export class Renderer {
   resize(width: number, height: number): void {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.handCamera.aspect = width / height;
+    this.handCamera.updateProjectionMatrix();
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(width, height, false);
   }
@@ -163,16 +248,102 @@ export class Renderer {
     void this.applyPlayerSkin(dataUrl);
   }
 
-  updateHand(dt: number, movementIntensity: number, miningActive: boolean): void {
-    this.handPhase += dt * (3.5 + movementIntensity * 4.2);
-    const swingX = Math.sin(this.handPhase) * (0.012 + movementIntensity * 0.03);
-    const swingY = Math.abs(Math.cos(this.handPhase * 0.72)) * movementIntensity * 0.026;
-    const miningKick = miningActive ? Math.sin(this.handPhase * 2.7) * 0.085 : 0;
+  setFirstPersonHandVisible(visible: boolean): void {
+    this.handRig.visible = visible;
+  }
 
-    this.handRig.position.x = 0.74 + swingX + miningKick * 0.26;
-    this.handRig.position.y = -0.86 - swingY + (miningActive ? 0.014 : 0);
-    this.handRig.rotation.z = -0.17 - miningKick * 0.38;
-    this.handRig.rotation.x = -0.34 - movementIntensity * 0.022 - miningKick * 0.72;
+  setFirstPersonAnimationPreset(preset: FirstPersonAnimationPreset): void {
+    this.handAnimationProfile =
+      preset === 'item' ? { ...ITEM_ANIMATION_PROFILE } : { ...HAND_ANIMATION_PROFILE };
+  }
+
+  setFirstPersonAnimationProfile(profile: Partial<FirstPersonAnimationProfile>): void {
+    this.handAnimationProfile = {
+      ...this.handAnimationProfile,
+      ...profile,
+    };
+  }
+
+  triggerFirstPersonAction(strength = 1): void {
+    const clampedStrength = Math.max(0.25, Math.min(1.6, strength));
+    this.actionStrength = Math.max(this.actionStrength, clampedStrength);
+    this.actionTimer = this.handAnimationProfile.swingDuration;
+  }
+
+  triggerFirstPersonJump(strength = 1): void {
+    const clampedStrength = Math.max(0.3, Math.min(1, strength));
+    this.jumpStrength = Math.max(this.jumpStrength, clampedStrength);
+    this.jumpTimer = 0.16;
+  }
+
+  updateHand(dt: number, movementIntensity: number, miningActive: boolean): void {
+    const profile = this.handAnimationProfile;
+    this.handPhase += dt * (profile.bobSpeed + movementIntensity * 4.4);
+    const moveAmount = Math.max(0, movementIntensity - 0.04);
+    const stride = Math.sin(this.handPhase);
+    const walkBobX = stride * (moveAmount * profile.walkBobX);
+    const walkBobY =
+      (1 - Math.cos(this.handPhase * 2)) * 0.5 * moveAmount * profile.walkBobY * 0.42;
+    const walkBobZ = stride * moveAmount * profile.walkBobZ * 0.22;
+
+    if (this.actionTimer > 0) {
+      this.actionTimer = Math.max(0, this.actionTimer - dt);
+    }
+    const actionProgressRaw =
+      profile.swingDuration > 0 ? 1 - this.actionTimer / profile.swingDuration : 1;
+    const actionProgress = Math.max(0, Math.min(1, actionProgressRaw));
+    const actionPulse = Math.sin(actionProgress * Math.PI) * Math.min(1, this.actionStrength);
+    if (this.actionTimer <= 0) {
+      this.actionStrength = Math.max(0, this.actionStrength - dt * 8);
+    }
+
+    if (this.jumpTimer > 0) {
+      this.jumpTimer = Math.max(0, this.jumpTimer - dt);
+    }
+    const jumpProgressRaw = 1 - this.jumpTimer / 0.16;
+    const jumpProgress = Math.max(0, Math.min(1, jumpProgressRaw));
+    const jumpPulse = this.jumpTimer > 0 ? Math.sin(jumpProgress * Math.PI) : 0;
+    const jumpAmount = jumpPulse * this.jumpStrength;
+    if (this.jumpTimer <= 0) {
+      this.jumpStrength = Math.max(0, this.jumpStrength - dt * 7.5);
+    }
+
+    if (miningActive && !this.wasMiningActive) {
+      this.miningPhase = 0;
+      this.miningBlend = 0;
+    }
+    const miningTarget = miningActive ? 1 : 0;
+    const blendSpeed = miningActive ? 26 : 7;
+    this.miningBlend += (miningTarget - this.miningBlend) * Math.min(1, dt * blendSpeed);
+    const miningRate = 0.9 + this.miningBlend * 1.9;
+    this.miningPhase += dt * profile.mineSpeed * miningRate;
+    const miningWaveBase = (Math.sin(this.miningPhase) + 1) * 0.5;
+    const miningWaveSnap = (Math.sin(this.miningPhase * 2 + 0.35) + 1) * 0.5;
+    const miningPulse = this.miningBlend * (miningWaveBase * 0.78 + miningWaveSnap * 0.22);
+    this.wasMiningActive = miningActive;
+    const combinedHitPulse = miningPulse + actionPulse;
+
+    this.handRig.position.x = HAND_BASE_X + walkBobX + combinedHitPulse * 0.11;
+    this.handRig.position.y =
+      HAND_BASE_Y -
+      walkBobY -
+      combinedHitPulse * 0.058 -
+      jumpAmount * 0.018;
+    this.handRig.position.z =
+      HAND_BASE_Z +
+      walkBobZ +
+      -combinedHitPulse * profile.mineForward +
+      jumpAmount * 0.01;
+    this.handRig.rotation.x =
+      HAND_BASE_ROT_X -
+      movementIntensity * 0.022 -
+      combinedHitPulse * profile.minePitch -
+      jumpAmount * 0.06;
+    this.handRig.rotation.y = HAND_BASE_ROT_Y + combinedHitPulse * profile.mineYaw;
+    this.handRig.rotation.z =
+      HAND_BASE_ROT_Z -
+      combinedHitPulse * profile.mineRoll +
+      jumpAmount * 0.024;
   }
 
   updateSpeedFov(dt: number, sprinting: boolean, moving: boolean, grounded: boolean): void {
@@ -185,6 +356,8 @@ export class Renderer {
     if (Math.abs(nextFov - this.camera.fov) > 0.01) {
       this.camera.fov = nextFov;
       this.camera.updateProjectionMatrix();
+      this.handCamera.fov = nextFov;
+      this.handCamera.updateProjectionMatrix();
     }
   }
 
@@ -312,7 +485,18 @@ export class Renderer {
   }
 
   render(): void {
+    // Pass 1: world.
+    this.renderer.autoClear = true;
     this.renderer.render(this.scene, this.camera);
+
+    // Pass 2: hand overlay on top.
+    if (!this.handRig.visible) {
+      return;
+    }
+    this.renderer.autoClear = false;
+    this.renderer.clearDepth();
+    this.renderer.render(this.handScene, this.handCamera);
+    this.renderer.autoClear = true;
   }
 
   private async applyPlayerSkin(dataUrl: string | null): Promise<void> {

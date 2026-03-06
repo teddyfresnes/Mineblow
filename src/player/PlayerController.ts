@@ -134,6 +134,7 @@ export class PlayerController {
     const canGroundSprint = sprintRequested && movingForward && !this.crouched && !obstacleAhead;
     if (this.inWater) {
       this.sprinting = false;
+      this.sprintToggle = false;
       this.sprintCarryInAir = false;
     } else if (movementGrounded) {
       this.sprinting = canGroundSprint;

@@ -742,8 +742,9 @@ export const createFirstPersonHand = (
 ): Group => {
   const armWidth = model === 'slim' ? 3 : 4;
   const hand = new Group();
+  const arm = new Group();
   const sampler = getSkinSampler(texture);
-  addBodyPart(hand, {
+  addBodyPart(arm, {
     width: armWidth,
     height: 12,
     depth: 4,
@@ -753,8 +754,16 @@ export const createFirstPersonHand = (
     position: [0, 0, 0],
     texture,
   });
-  hand.rotation.z = -0.08;
-  hand.scale.set(1.9, 1.9, 1.9);
+  // Flip vertically and rotate 180deg around the arm axis (watch/outer side swap).
+  arm.rotation.set(Math.PI, Math.PI, 0);
+  hand.add(arm);
+  hand.position.x = 0.12;
+  hand.position.y = -0.01;
+  hand.position.z = 0.045;
+  hand.rotation.x = -0.14;
+  hand.rotation.y = -0.80;
+  hand.rotation.z = 0.44;
+  hand.scale.set(1.25, 1.25, 1.25);
   return hand;
 };
 

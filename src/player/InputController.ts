@@ -7,6 +7,7 @@ export class InputController {
   private lookDeltaX = 0;
   private lookDeltaY = 0;
   private primaryDown = false;
+  private primaryClicked = false;
   private secondaryClicked = false;
   private wheelSteps = 0;
   private pointerLockListener?: PointerLockListener;
@@ -83,6 +84,12 @@ export class InputController {
     return this.primaryDown;
   }
 
+  consumePrimaryClick(): boolean {
+    const clicked = this.primaryClicked;
+    this.primaryClicked = false;
+    return clicked;
+  }
+
   consumeSecondaryClick(): boolean {
     const clicked = this.secondaryClicked;
     this.secondaryClicked = false;
@@ -151,6 +158,7 @@ export class InputController {
   private handleMouseDown(event: MouseEvent): void {
     if (event.button === 0) {
       this.primaryDown = true;
+      this.primaryClicked = true;
     }
     if (event.button === 2) {
       this.secondaryClicked = true;
