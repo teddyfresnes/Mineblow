@@ -22,9 +22,13 @@ import { createFirstPersonHand, disposeModel, loadSkinTexture } from './SkinMode
 import { SkyDome } from './SkyDome';
 import { TextureAtlas } from './TextureAtlas';
 
+const BASE_FOV = 75;
+const SPRINT_FOV_BOOST = 4.65;
+const AIRBORNE_SPRINT_FOV_BOOST = 5.45;
+
 export class Renderer {
   readonly scene = new Scene();
-  readonly camera = new PerspectiveCamera(75, 1, 0.1, 500);
+  readonly camera = new PerspectiveCamera(BASE_FOV, 1, 0.1, 500);
   readonly atlas = new TextureAtlas();
   readonly sky = new SkyDome();
 
@@ -66,9 +70,9 @@ export class Renderer {
     this.scene.fog = new Fog(new Color('#95b9dd'), 60, 190);
     this.scene.add(this.sky.group);
     this.camera.add(this.handRig);
-    this.handRig.position.set(0.54, -0.55, -0.86);
-    this.handRig.rotation.set(0, 0.1, -0.12);
-    this.handRig.scale.set(1.5, 1.5, 1.5);
+    this.handRig.position.set(0.74, -0.86, -0.66);
+    this.handRig.rotation.set(-0.34, 0.22, -0.17);
+    this.handRig.scale.set(1.85, 1.85, 1.85);
     this.lights = addSceneLights(this.scene);
     updateSunForCamera(this.lights, 0, 0);
     void this.setPlayerSkin(null);
@@ -160,15 +164,28 @@ export class Renderer {
   }
 
   updateHand(dt: number, movementIntensity: number, miningActive: boolean): void {
-    this.handPhase += dt * (4.6 + movementIntensity * 8);
-    const swingX = Math.sin(this.handPhase) * (0.035 + movementIntensity * 0.1);
-    const swingY = Math.abs(Math.cos(this.handPhase * 0.75)) * movementIntensity * 0.08;
-    const miningKick = miningActive ? Math.sin(this.handPhase * 2.8) * 0.15 : 0;
+    this.handPhase += dt * (3.5 + movementIntensity * 4.2);
+    const swingX = Math.sin(this.handPhase) * (0.012 + movementIntensity * 0.03);
+    const swingY = Math.abs(Math.cos(this.handPhase * 0.72)) * movementIntensity * 0.026;
+    const miningKick = miningActive ? Math.sin(this.handPhase * 2.7) * 0.085 : 0;
 
-    this.handRig.position.x = 0.54 + swingX + miningKick * 0.35;
-    this.handRig.position.y = -0.55 - swingY + (miningActive ? 0.03 : 0);
-    this.handRig.rotation.z = -0.12 - miningKick * 0.5;
-    this.handRig.rotation.x = -0.12 - movementIntensity * 0.05 - miningKick;
+    this.handRig.position.x = 0.74 + swingX + miningKick * 0.26;
+    this.handRig.position.y = -0.86 - swingY + (miningActive ? 0.014 : 0);
+    this.handRig.rotation.z = -0.17 - miningKick * 0.38;
+    this.handRig.rotation.x = -0.34 - movementIntensity * 0.022 - miningKick * 0.72;
+  }
+
+  updateSpeedFov(dt: number, sprinting: boolean, moving: boolean, grounded: boolean): void {
+    const targetFov =
+      sprinting && moving
+        ? BASE_FOV + (grounded ? SPRINT_FOV_BOOST : AIRBORNE_SPRINT_FOV_BOOST)
+        : BASE_FOV;
+    const blend = 1 - Math.exp(-dt * 10);
+    const nextFov = this.camera.fov + (targetFov - this.camera.fov) * blend;
+    if (Math.abs(nextFov - this.camera.fov) > 0.01) {
+      this.camera.fov = nextFov;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   spawnDroppedItem(itemId: string, color: string, x: number, y: number, z: number): void {
@@ -300,16 +317,16 @@ export class Renderer {
 
   private async applyPlayerSkin(dataUrl: string | null): Promise<void> {
     const requestId = ++this.skinRequestId;
-    let texture = await loadSkinTexture(null);
+    let skin = await loadSkinTexture(null);
     if (dataUrl) {
       try {
-        texture = await loadSkinTexture(dataUrl);
+        skin = await loadSkinTexture(dataUrl);
       } catch {
-        texture = await loadSkinTexture(null);
+        skin = await loadSkinTexture(null);
       }
     }
     if (requestId !== this.skinRequestId) {
-      texture.dispose();
+      skin.texture.dispose();
       return;
     }
 
@@ -319,7 +336,7 @@ export class Renderer {
       this.handModel = null;
     }
 
-    this.handModel = createFirstPersonHand(texture);
+    this.handModel = createFirstPersonHand(skin.texture, skin.model);
     this.handRig.add(this.handModel);
   }
 }

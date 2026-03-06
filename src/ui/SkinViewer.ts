@@ -50,16 +50,16 @@ export class SkinViewer {
 
   async setSkin(dataUrl: string | null): Promise<void> {
     const requestId = ++this.skinRequestId;
-    let texture = await loadSkinTexture(null);
+    let skin = await loadSkinTexture(null);
     if (dataUrl) {
       try {
-        texture = await loadSkinTexture(dataUrl);
+        skin = await loadSkinTexture(dataUrl);
       } catch {
-        texture = await loadSkinTexture(null);
+        skin = await loadSkinTexture(null);
       }
     }
     if (this.disposed || requestId !== this.skinRequestId) {
-      texture.dispose();
+      skin.texture.dispose();
       return;
     }
 
@@ -69,7 +69,7 @@ export class SkinViewer {
       this.model = null;
     }
 
-    this.model = createPlayerModel(texture);
+    this.model = createPlayerModel(skin.texture, skin.model);
     this.model.position.y = 0;
     this.scene.add(this.model);
   }

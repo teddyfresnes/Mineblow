@@ -37,6 +37,32 @@ const overlapsSolid = (world: World, position: [number, number, number]): boolea
   return false;
 };
 
+const hasGroundSupportAt = (
+  world: World,
+  position: [number, number, number],
+  probeDepth = 0.06,
+): boolean => {
+  const sampleY = Math.floor(position[1] - probeDepth);
+  const sampleRadius = Math.max(0.02, HALF_WIDTH - 0.03);
+  const sampleOffsets: Array<[number, number]> = [
+    [0, 0],
+    [-sampleRadius, -sampleRadius],
+    [sampleRadius, -sampleRadius],
+    [-sampleRadius, sampleRadius],
+    [sampleRadius, sampleRadius],
+  ];
+
+  for (const [offsetX, offsetZ] of sampleOffsets) {
+    const sampleX = Math.floor(position[0] + offsetX);
+    const sampleZ = Math.floor(position[2] + offsetZ);
+    if (isSolidBlock(world.getBlock(sampleX, sampleY, sampleZ))) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 const resolveAxis = (
   world: World,
   position: [number, number, number],
@@ -111,12 +137,7 @@ export class PlayerPhysics {
       grounded = nextVelocity[1] <= 0;
       nextVelocity[1] = 0;
     } else {
-      const probePosition: [number, number, number] = [
-        nextPosition[0],
-        nextPosition[1] - 0.05,
-        nextPosition[2],
-      ];
-      grounded = overlapsSolid(world, probePosition);
+      grounded = hasGroundSupportAt(world, nextPosition);
     }
 
     return {
@@ -165,5 +186,9 @@ export class PlayerPhysics {
       inWater: depth > 0,
       depthBlocks: depth,
     };
+  }
+
+  static hasGroundSupport(world: World, position: [number, number, number]): boolean {
+    return hasGroundSupportAt(world, position);
   }
 }

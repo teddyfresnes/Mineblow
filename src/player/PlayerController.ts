@@ -18,9 +18,18 @@ export class PlayerController {
   private state: PlayerState;
   private grounded = false;
   private crouched = false;
-  private sprintLatched = false;
-  private forwardTapTimerMs = 0;
+  private sprinting = false;
+  private sprintToggle = false;
+  private inWater = false;
+  private jumpCooldownMs = 0;
+  private groundedDurationMs = 0;
+  private coyoteTimeMs = 0;
+  private jumpBufferMs = 0;
+  private sprintCarryInAir = false;
+  private allowHeldJump = false;
+  private waterSurfaceRiseLockMs = 0;
   private readonly moveVector = new Vector3();
+  private readonly upAxis = new Vector3(0, 1, 0);
   private readonly lookEuler = new Euler(0, 0, 0, 'YXZ');
 
   constructor(initialState: PlayerState) {
@@ -33,7 +42,19 @@ export class PlayerController {
     world: World,
     controls: KeyBindings,
   ): PlayerFrameUpdate {
-    this.forwardTapTimerMs = Math.max(0, this.forwardTapTimerMs - dt * 1000);
+    const dtMs = dt * 1000;
+    const tickFactor = dt / PLAYER_CONFIG.mcTickSeconds;
+
+    this.jumpCooldownMs = Math.max(0, this.jumpCooldownMs - dtMs);
+    this.coyoteTimeMs = Math.max(0, this.coyoteTimeMs - dtMs);
+    this.jumpBufferMs = Math.max(0, this.jumpBufferMs - dtMs);
+    this.waterSurfaceRiseLockMs = Math.max(0, this.waterSurfaceRiseLockMs - dtMs);
+    if (this.grounded) {
+      this.groundedDurationMs += dtMs;
+      this.coyoteTimeMs = PLAYER_CONFIG.coyoteTimeMs;
+    } else {
+      this.groundedDurationMs = 0;
+    }
 
     const look = input.consumeLookDelta();
     this.state.yaw -= look.x * PLAYER_CONFIG.mouseSensitivity;
@@ -42,17 +63,6 @@ export class PlayerController {
       -Math.PI / 2 + 0.01,
       Math.PI / 2 - 0.01,
     );
-
-    const forwardJustPressed = input.consumeAnyJustPressed([
-      controls.moveForward.primary,
-      controls.moveForward.secondary,
-    ]);
-    if (forwardJustPressed) {
-      if (this.forwardTapTimerMs > 0) {
-        this.sprintLatched = true;
-      }
-      this.forwardTapTimerMs = PLAYER_CONFIG.sprintDoubleTapWindowMs;
-    }
 
     const left = Number(
       input.isAnyKeyDown([controls.moveLeft.primary, controls.moveLeft.secondary]),
@@ -67,60 +77,123 @@ export class PlayerController {
       input.isAnyKeyDown([controls.moveBackward.primary, controls.moveBackward.secondary]),
     );
     const moveX = right - left;
-    const moveZ = forward - backward;
+    const moveForward = forward - backward;
 
     this.crouched = input.isAnyKeyDown([controls.crouch.primary, controls.crouch.secondary]);
     const sprintHeld = input.isAnyKeyDown([controls.sprint.primary, controls.sprint.secondary]);
+    const sprintPressed = input.consumeAnyJustPressed([
+      controls.sprint.primary,
+      controls.sprint.secondary,
+    ]);
     const jumpHeld = input.isAnyKeyDown([controls.jump.primary, controls.jump.secondary]);
+    const jumpJustPressed = input.consumeAnyJustPressed([
+      controls.jump.primary,
+      controls.jump.secondary,
+    ]);
+    if (jumpJustPressed) {
+      this.jumpBufferMs = PLAYER_CONFIG.jumpBufferMs;
+    }
+    if (!jumpHeld) {
+      this.allowHeldJump = false;
+    }
+    const wasInWater = this.inWater;
     const waterState = PlayerPhysics.sampleWater(world, this.state.position);
-
-    if (forward === 0 || backward > 0 || this.crouched) {
-      this.sprintLatched = false;
+    this.inWater = waterState.inWater;
+    if (!this.inWater) {
+      this.waterSurfaceRiseLockMs = 0;
     }
 
-    const localMove = new Vector3(moveX, 0, -moveZ);
+    const localMove = new Vector3(moveX, 0, -moveForward);
     if (localMove.lengthSq() > 1) {
       localMove.normalize();
     }
 
     const moving = localMove.lengthSq() > 0;
     if (moving) {
-      this.moveVector.copy(localMove).applyAxisAngle(new Vector3(0, 1, 0), this.state.yaw);
+      this.moveVector.copy(localMove).applyAxisAngle(this.upAxis, this.state.yaw);
     } else {
       this.moveVector.set(0, 0, 0);
     }
 
-    const obstacleAhead = moving ? this.hasSprintObstacle(world, this.moveVector) : false;
-    if (obstacleAhead) {
-      this.sprintLatched = false;
+    const movementGrounded = this.grounded && this.state.velocity[1] <= 0.04;
+    const movingForward = moveForward > 0;
+    const obstacleAhead =
+      movementGrounded && movingForward && !jumpHeld && moving
+        ? this.hasSprintObstacle(world, this.moveVector)
+        : false;
+
+    if (sprintPressed && movingForward && !this.crouched && !obstacleAhead) {
+      this.sprintToggle = true;
     }
-    const sprintIntent =
-      !this.crouched &&
-      moving &&
-      !obstacleAhead &&
-      (sprintHeld || (this.sprintLatched && forward > 0));
-    const sprinting = sprintIntent && !(!this.grounded && Math.abs(moveX) > 0);
-    const movementSpeed = this.crouched
-      ? PLAYER_CONFIG.crouchSpeed
-      : sprinting
-        ? PLAYER_CONFIG.sprintSpeed
-        : PLAYER_CONFIG.walkSpeed;
 
-    const lateralSpeed =
-      !this.grounded && sprinting && Math.abs(localMove.x) > 0 ? PLAYER_CONFIG.walkSpeed : movementSpeed;
-    const localVelocity = new Vector3(
-      localMove.x * lateralSpeed * (waterState.inWater ? 0.62 : 1),
-      0,
-      localMove.z * movementSpeed * (waterState.inWater ? 0.62 : 1),
-    );
-    localVelocity.applyAxisAngle(new Vector3(0, 1, 0), this.state.yaw);
+    if (this.sprintToggle && (!moving || backward > 0 || this.crouched)) {
+      this.sprintToggle = false;
+    }
 
-    this.state.velocity[0] = localVelocity.x;
-    this.state.velocity[2] = localVelocity.z;
+    const sprintRequested = sprintHeld || this.sprintToggle;
+    const canGroundSprint = sprintRequested && movingForward && !this.crouched && !obstacleAhead;
+    if (this.inWater) {
+      this.sprinting = false;
+      this.sprintCarryInAir = false;
+    } else if (movementGrounded) {
+      this.sprinting = canGroundSprint;
+      this.sprintCarryInAir = canGroundSprint;
+    } else {
+      if (canGroundSprint) {
+        this.sprintCarryInAir = true;
+      }
+      if (backward > 0 || this.crouched) {
+        this.sprintCarryInAir = false;
+      }
+      this.sprinting = this.sprintCarryInAir;
+    }
+    if (moving) {
+      if (this.sprinting && movingForward && Math.abs(moveX) > 0) {
+        localMove.x *= movementGrounded
+          ? PLAYER_CONFIG.groundSprintForwardStrafeScale
+          : PLAYER_CONFIG.airSprintForwardStrafeScale;
+        localMove.normalize();
+      }
+      this.moveVector.copy(localMove).applyAxisAngle(this.upAxis, this.state.yaw);
+    }
 
-    if (waterState.inWater) {
+    if (this.inWater) {
+      const movementSpeed = this.crouched
+        ? PLAYER_CONFIG.crouchSpeed
+        : this.sprinting
+          ? PLAYER_CONFIG.sprintSpeed
+          : PLAYER_CONFIG.walkSpeed;
+      const lateralSpeed =
+        !this.grounded && this.sprinting && Math.abs(localMove.x) > 0
+          ? PLAYER_CONFIG.walkSpeed
+          : movementSpeed;
+      const localVelocity = new Vector3(
+        localMove.x * lateralSpeed * 0.62,
+        0,
+        localMove.z * movementSpeed * 0.62,
+      );
+      localVelocity.applyAxisAngle(this.upAxis, this.state.yaw);
+      this.state.velocity[0] = localVelocity.x;
+      this.state.velocity[2] = localVelocity.z;
+
       const sinkStrength = waterState.depthBlocks >= 2 ? 5.2 : 2.1;
-      if (jumpHeld) {
+      const justEnteredWater = !wasInWater && this.inWater;
+      const inTopWaterBand = waterState.depthBlocks <= 1;
+      if (
+        justEnteredWater &&
+        jumpHeld &&
+        inTopWaterBand &&
+        this.state.velocity[1] <= 0
+      ) {
+        // Force a short dip on re-entry so the surface bob keeps a visible amplitude.
+        this.waterSurfaceRiseLockMs = 140;
+      }
+
+      const lockSurfaceRise = jumpHeld && inTopWaterBand && this.waterSurfaceRiseLockMs > 0;
+      if (lockSurfaceRise) {
+        const forcedSinkSpeed = this.crouched ? -2.15 : -0.95;
+        this.state.velocity[1] = Math.min(this.state.velocity[1], forcedSinkSpeed);
+      } else if (jumpHeld) {
         this.state.velocity[1] = Math.min(4.1, this.state.velocity[1] + 12 * dt);
       } else {
         const crouchSink = this.crouched ? 2.4 : 0;
@@ -129,22 +202,149 @@ export class PlayerController {
           -4.5,
         );
       }
+      if (waterState.depthBlocks >= 2 || !jumpHeld) {
+        this.waterSurfaceRiseLockMs = 0;
+      }
       this.state.velocity[1] *= 0.96;
     } else {
+      const horizontalDragTick = movementGrounded
+        ? PLAYER_CONFIG.groundFrictionTick
+        : PLAYER_CONFIG.airFrictionTick;
+      const frictionScale = Math.pow(
+        horizontalDragTick,
+        tickFactor,
+      );
+      this.state.velocity[0] *= frictionScale;
+      this.state.velocity[2] *= frictionScale;
+      const horizontalSpeedBeforeAirControl = Math.hypot(this.state.velocity[0], this.state.velocity[2]);
+
+      if (moving) {
+        let accelerationTick = movementGrounded
+          ? this.crouched
+            ? PLAYER_CONFIG.groundCrouchAccelerationTick
+            : this.sprinting
+              ? PLAYER_CONFIG.groundSprintAccelerationTick
+              : PLAYER_CONFIG.groundWalkAccelerationTick
+          : this.sprinting
+            ? PLAYER_CONFIG.airSprintAccelerationTick
+            : PLAYER_CONFIG.airWalkAccelerationTick;
+
+        if (!movementGrounded && Math.abs(moveX) > 0) {
+          if (this.sprinting) {
+            accelerationTick *=
+              moveForward > 0
+                ? PLAYER_CONFIG.airSprintSideControlPenalty
+                : PLAYER_CONFIG.airStrafePenalty;
+          } else if (!movingForward) {
+            accelerationTick *= PLAYER_CONFIG.airStrafePenalty;
+          }
+        }
+
+        const acceleration = accelerationTick * (1 / PLAYER_CONFIG.mcTickSeconds);
+        this.state.velocity[0] += this.moveVector.x * acceleration * tickFactor;
+        this.state.velocity[2] += this.moveVector.z * acceleration * tickFactor;
+      }
+
+      if (!movementGrounded && this.state.velocity[1] < 0 && Math.abs(moveX) > 0 && moveForward <= 0) {
+        const horizontalSpeedAfterAirControl = Math.hypot(this.state.velocity[0], this.state.velocity[2]);
+        const maxAllowedAirStrafeSpeed = Math.max(
+          horizontalSpeedBeforeAirControl,
+          PLAYER_CONFIG.fallStrafeBaseControlSpeed,
+        );
+        if (horizontalSpeedAfterAirControl > maxAllowedAirStrafeSpeed && horizontalSpeedAfterAirControl > 0.0001) {
+          const scale = maxAllowedAirStrafeSpeed / horizontalSpeedAfterAirControl;
+          this.state.velocity[0] *= scale;
+          this.state.velocity[2] *= scale;
+        }
+      }
+
+      const targetHorizontalSpeed = movementGrounded
+        ? this.crouched
+          ? PLAYER_CONFIG.crouchSpeed
+          : this.sprinting
+            ? PLAYER_CONFIG.sprintSpeed
+            : PLAYER_CONFIG.walkSpeed
+        : this.sprinting
+          ? PLAYER_CONFIG.airborneSprintSpeed
+          : PLAYER_CONFIG.airborneWalkSpeed;
+      const horizontalSpeedCap = Math.min(PLAYER_CONFIG.maxHorizontalSpeed, targetHorizontalSpeed);
+      const horizontalSpeed = Math.hypot(this.state.velocity[0], this.state.velocity[2]);
+      if (horizontalSpeed > horizontalSpeedCap && horizontalSpeed > 0.0001) {
+        const scale = horizontalSpeedCap / horizontalSpeed;
+        this.state.velocity[0] *= scale;
+        this.state.velocity[2] *= scale;
+      }
+
+      if (this.crouched && movementGrounded && !jumpHeld) {
+        this.applyCrouchEdgeClamp(world, dt);
+      }
+
       this.state.velocity[1] -= PLAYER_CONFIG.gravity * dt;
+      this.state.velocity[1] *= Math.pow(PLAYER_CONFIG.verticalDragTick, tickFactor);
+      this.state.velocity[1] = Math.max(this.state.velocity[1], -PLAYER_CONFIG.maxFallSpeed);
+    }
+
+    if (!this.inWater && this.state.velocity[1] < -PLAYER_CONFIG.landingApproachMinFallSpeed) {
+      const [x, y, z] = this.state.position;
+      const probeTime = Math.min(dt, PLAYER_CONFIG.landingProbeSeconds);
+      const probePosition: [number, number, number] = [
+        x,
+        y + this.state.velocity[1] * probeTime,
+        z,
+      ];
+      if (PlayerPhysics.hasGroundSupport(world, probePosition)) {
+        this.state.velocity[1] *= PLAYER_CONFIG.landingApproachDamping;
+      }
     }
 
     let jumped = false;
-    if (!waterState.inWater && this.grounded && jumpHeld) {
+    const autoJumpFromHold =
+      jumpHeld &&
+      !jumpJustPressed &&
+      this.allowHeldJump &&
+      this.groundedDurationMs >= PLAYER_CONFIG.autoJumpGroundedDelayMs;
+    const jumpRequested = this.jumpBufferMs > 0 || autoJumpFromHold;
+    const canUseGroundGrace = movementGrounded || this.coyoteTimeMs > 0;
+    if (!this.inWater && canUseGroundGrace && jumpRequested && this.jumpCooldownMs <= 0) {
       this.state.velocity[1] = PLAYER_CONFIG.jumpVelocity;
       this.grounded = false;
       jumped = true;
+      this.groundedDurationMs = 0;
+      this.coyoteTimeMs = 0;
+      this.jumpBufferMs = 0;
+      this.jumpCooldownMs = PLAYER_CONFIG.jumpRepeatDelayMs;
+      this.allowHeldJump = false;
+      if (this.sprinting && movingForward) {
+        const boostDirection = new Vector3(0, 0, -1).applyAxisAngle(this.upAxis, this.state.yaw);
+        this.state.velocity[0] += boostDirection.x * PLAYER_CONFIG.sprintJumpBoost;
+        this.state.velocity[2] += boostDirection.z * PLAYER_CONFIG.sprintJumpBoost;
+      }
     }
 
+    const wasGrounded = this.grounded;
+    const verticalVelocityBeforeSim = this.state.velocity[1];
     const result = PlayerPhysics.simulate(world, this.state.position, this.state.velocity, dt);
     this.state.position = result.position;
     this.state.velocity = result.velocity;
     this.grounded = result.grounded;
+    if (!wasGrounded && this.grounded) {
+      this.groundedDurationMs = 0;
+      this.allowHeldJump = verticalVelocityBeforeSim < -0.2;
+      this.coyoteTimeMs = PLAYER_CONFIG.coyoteTimeMs;
+      this.jumpCooldownMs = Math.max(
+        this.jumpCooldownMs,
+        PLAYER_CONFIG.landingJumpCooldownMs,
+      );
+    }
+    if (!this.grounded) {
+      this.groundedDurationMs = 0;
+      if (this.coyoteTimeMs <= 0) {
+        this.allowHeldJump = false;
+      }
+      if (backward > 0 || this.crouched) {
+        this.sprintCarryInAir = false;
+      }
+    }
 
     if (this.state.position[1] < -16) {
       this.respawn();
@@ -152,7 +352,7 @@ export class PlayerController {
 
     return {
       jumped,
-      sprinting,
+      sprinting: this.sprinting,
       moving,
     };
   }
@@ -160,6 +360,8 @@ export class PlayerController {
   respawn(): void {
     this.state.position = [...this.state.spawnPoint];
     this.state.velocity = [0, 0, 0];
+    this.sprintCarryInAir = false;
+    this.waterSurfaceRiseLockMs = 0;
   }
 
   setSelectedSlot(slotIndex: number): void {
@@ -219,22 +421,51 @@ export class PlayerController {
     return this.grounded;
   }
 
+  isInWater(): boolean {
+    return this.inWater;
+  }
+
+  private applyCrouchEdgeClamp(world: World, dt: number): void {
+    const [x, y, z] = this.state.position;
+    if (!PlayerPhysics.hasGroundSupport(world, [x, y, z])) {
+      return;
+    }
+
+    const nextX = x + this.state.velocity[0] * dt;
+    const nextZ = z + this.state.velocity[2] * dt;
+    if (PlayerPhysics.hasGroundSupport(world, [nextX, y, nextZ])) {
+      return;
+    }
+
+    const canMoveX = PlayerPhysics.hasGroundSupport(world, [nextX, y, z]);
+    const canMoveZ = PlayerPhysics.hasGroundSupport(world, [x, y, nextZ]);
+
+    if (!canMoveX) {
+      this.state.velocity[0] = 0;
+    }
+    if (!canMoveZ) {
+      this.state.velocity[2] = 0;
+    }
+  }
+
   private hasSprintObstacle(world: World, direction: Vector3): boolean {
     const [x, y, z] = this.state.position;
     const movement = direction.clone().normalize();
     const right = new Vector3(-movement.z, 0, movement.x);
-    const probeDistance = 0.62;
+    const probeDistance = 0.45;
     const probeX = x + movement.x * probeDistance;
     const probeZ = z + movement.z * probeDistance;
     const feetY = Math.floor(y + 0.08);
     const chestY = Math.floor(y + (this.crouched ? 1.05 : 1.4));
+    const headY = Math.floor(y + (this.crouched ? 1.45 : 1.72));
 
-    for (const lateralOffset of [-0.22, 0, 0.22]) {
+    for (const lateralOffset of [-0.16, 0, 0.16]) {
       const worldX = Math.floor(probeX + right.x * lateralOffset);
       const worldZ = Math.floor(probeZ + right.z * lateralOffset);
       if (
         isSolidBlock(world.getBlock(worldX, feetY, worldZ)) ||
-        isSolidBlock(world.getBlock(worldX, chestY, worldZ))
+        isSolidBlock(world.getBlock(worldX, chestY, worldZ)) ||
+        isSolidBlock(world.getBlock(worldX, headY, worldZ))
       ) {
         return true;
       }

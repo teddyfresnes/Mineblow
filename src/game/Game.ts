@@ -354,6 +354,12 @@ export class Game {
       this.updateDroppedItems(dt);
       this.hud.updateHand(dt, this.movementIntensity, this.miningProgressMs > 0);
       this.renderer.updateHand(dt, this.movementIntensity, this.miningProgressMs > 0);
+      this.renderer.updateSpeedFov(
+        dt,
+        frameUpdate.sprinting,
+        frameUpdate.moving,
+        player.isGrounded(),
+      );
     } else {
       this.resetMining();
       this.targetHit = null;
@@ -361,6 +367,7 @@ export class Game {
       this.hud.setMiningProgress(0);
       this.hud.updateHand(dt, 0, false);
       this.renderer.updateHand(dt, 0, false);
+      this.renderer.updateSpeedFov(dt, false, false, true);
     }
 
     this.renderer.updateTransientEffects(dt);
