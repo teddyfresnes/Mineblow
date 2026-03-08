@@ -1,26 +1,57 @@
 import { CONTROL_ACTIONS } from '../game/Controls';
 import type {
   ChunkDiffRecord,
+  StoredAppMeta,
+  StoredChunkDiffRecord,
   StoredGlobalStats,
   StoredSettings,
   WorldSave,
 } from '../types/save';
 
-const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+interface LegacyWorldSave {
+  schemaVersion: 4;
+  worldId: 'default-world';
+  seed: string;
+  createdAt: string;
+  player: {
+    position: [number, number, number];
+    velocity: [number, number, number];
+    yaw: number;
+    pitch: number;
+    selectedSlot: number;
+    spawnPoint: [number, number, number];
+  };
+  inventory: Array<{
+    blockId: number | null;
+    count: number;
+  }>;
+  worldStats: {
+    blocksMined: number;
+    blocksPlaced: number;
+    distanceTravelled: number;
+    playTimeMs: number;
+    jumps: number;
+    craftedItems: number;
+  };
+}
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
 
 const isBlockId = (value: unknown): boolean =>
   isFiniteNumber(value) && Number.isInteger(value) && value >= 0 && value <= 15;
 
 const isVector3 = (value: unknown): value is [number, number, number] =>
-  Array.isArray(value) &&
-  value.length === 3 &&
-  value.every((element) => isFiniteNumber(element));
+  Array.isArray(value) && value.length === 3 && value.every((element) => isFiniteNumber(element));
 
 const isStringOrNull = (value: unknown): value is string | null =>
   value === null || typeof value === 'string';
 
+const isIsoString = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0;
+
 const isWorldStats = (value: unknown): boolean => {
-  if (!value || typeof value !== 'object') {
+  if (!value || typeof value !== "object") {
     return false;
   }
   const stats = value as Record<string, unknown>;
@@ -34,6 +65,31 @@ const isWorldStats = (value: unknown): boolean => {
   );
 };
 
+const isInventorySnapshot = (value: unknown): boolean =>
+  Array.isArray(value) &&
+  value.every(
+    (slot) =>
+      slot &&
+      typeof slot === 'object' &&
+      isFiniteNumber((slot as { count: unknown }).count) &&
+      ((slot as { blockId: unknown }).blockId === null || isBlockId((slot as { blockId: unknown }).blockId)),
+  );
+
+const isPlayerState = (value: unknown): boolean => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const player = value as Record<string, unknown>;
+  return (
+    isVector3(player.position) &&
+    isVector3(player.velocity) &&
+    isVector3(player.spawnPoint) &&
+    isFiniteNumber(player.yaw) &&
+    isFiniteNumber(player.pitch) &&
+    isFiniteNumber(player.selectedSlot)
+  );
+};
+
 export const isWorldSave = (value: unknown): value is WorldSave => {
   if (!value || typeof value !== 'object') {
     return false;
@@ -41,26 +97,36 @@ export const isWorldSave = (value: unknown): value is WorldSave => {
 
   const candidate = value as WorldSave;
   return (
+    candidate.schemaVersion === 5 &&
+    typeof candidate.id === 'string' &&
+    candidate.id.length > 0 &&
+    typeof candidate.worldId === 'string' &&
+    candidate.worldId.length > 0 &&
+    typeof candidate.name === 'string' &&
+    candidate.name.length > 0 &&
+    typeof candidate.seed === 'string' &&
+    isIsoString(candidate.createdAt) &&
+    isIsoString(candidate.updatedAt) &&
+    isIsoString(candidate.lastPlayedAt) &&
+    isPlayerState(candidate.player) &&
+    isInventorySnapshot(candidate.inventory) &&
+    isWorldStats(candidate.worldStats)
+  );
+};
+
+export const isLegacyWorldSave = (value: unknown): value is LegacyWorldSave => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as LegacyWorldSave;
+  return (
     candidate.schemaVersion === 4 &&
     candidate.worldId === 'default-world' &&
     typeof candidate.seed === 'string' &&
-    typeof candidate.createdAt === 'string' &&
-    candidate.player !== null &&
-    typeof candidate.player === 'object' &&
-    isVector3(candidate.player.position) &&
-    isVector3(candidate.player.velocity) &&
-    isVector3(candidate.player.spawnPoint) &&
-    isFiniteNumber(candidate.player.yaw) &&
-    isFiniteNumber(candidate.player.pitch) &&
-    isFiniteNumber(candidate.player.selectedSlot) &&
-    Array.isArray(candidate.inventory) &&
-    candidate.inventory.every(
-      (slot) =>
-        slot &&
-        typeof slot === 'object' &&
-        isFiniteNumber(slot.count) &&
-        (slot.blockId === null || isBlockId(slot.blockId)),
-    ) &&
+    isIsoString(candidate.createdAt) &&
+    isPlayerState(candidate.player) &&
+    isInventorySnapshot(candidate.inventory) &&
     isWorldStats(candidate.worldStats)
   );
 };
@@ -82,6 +148,20 @@ export const isChunkDiffRecord = (value: unknown): value is ChunkDiffRecord => {
         isFiniteNumber(entry.index) &&
         isBlockId(entry.blockId),
     )
+  );
+};
+
+export const isStoredChunkDiffRecord = (value: unknown): value is StoredChunkDiffRecord => {
+  if (!isChunkDiffRecord(value)) {
+    return false;
+  }
+
+  const candidate = value as StoredChunkDiffRecord;
+  return (
+    typeof candidate.id === 'string' &&
+    candidate.id.length > 0 &&
+    typeof candidate.worldId === 'string' &&
+    candidate.worldId.length > 0
   );
 };
 
@@ -123,5 +203,18 @@ export const isStoredGlobalStats = (value: unknown): value is StoredGlobalStats 
     isFiniteNumber(candidate.totalJumps) &&
     isFiniteNumber(candidate.totalCraftedItems) &&
     isFiniteNumber(candidate.worldsCreated)
+  );
+};
+
+export const isStoredAppMeta = (value: unknown): value is StoredAppMeta => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as StoredAppMeta;
+  return (
+    candidate.schemaVersion === 1 &&
+    isStringOrNull(candidate.activeWorldId) &&
+    isStringOrNull(candidate.lastWorldId)
   );
 };

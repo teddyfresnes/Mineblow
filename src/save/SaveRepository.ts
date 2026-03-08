@@ -6,13 +6,19 @@ import {
   createEmptyGlobalStats,
   type ChunkDiffRecord,
   type GlobalStats,
+  type StoredAppMeta,
+  type StoredChunkDiffRecord,
   type StoredGlobalStats,
   type StoredSettings,
   type WorldSave,
   type WorldStats,
+  type WorldSummary,
 } from '../types/save';
 import {
   isChunkDiffRecord,
+  isLegacyWorldSave,
+  isStoredAppMeta,
+  isStoredChunkDiffRecord,
   isStoredGlobalStats,
   isStoredSettings,
   isWorldSave,
@@ -21,11 +27,15 @@ import {
 interface MineblowDb extends DBSchema {
   meta: {
     key: string;
+    value: WorldSave | StoredAppMeta;
+  };
+  worlds: {
+    key: string;
     value: WorldSave;
   };
   chunkDiffs: {
     key: string;
-    value: ChunkDiffRecord;
+    value: ChunkDiffRecord | StoredChunkDiffRecord;
   };
   settings: {
     key: 'settings';
@@ -42,12 +52,44 @@ export interface LoadedWorld {
   chunkDiffs: Map<string, ChunkDiffRecord>;
 }
 
+const DEFAULT_APP_META: StoredAppMeta = {
+  schemaVersion: 1,
+  activeWorldId: null,
+  lastWorldId: null,
+};
+
+const sortWorlds = (worlds: WorldSummary[]): WorldSummary[] =>
+  [...worlds].sort((left, right) => {
+    const leftScore = Date.parse(left.lastPlayedAt || left.updatedAt || left.createdAt);
+    const rightScore = Date.parse(right.lastPlayedAt || right.updatedAt || right.createdAt);
+    return rightScore - leftScore;
+  });
+
+const toSummary = (save: WorldSave): WorldSummary => ({
+  id: save.id,
+  name: save.name,
+  seed: save.seed,
+  createdAt: save.createdAt,
+  updatedAt: save.updatedAt,
+  lastPlayedAt: save.lastPlayedAt,
+  worldStats: { ...save.worldStats },
+});
+
+const slugify = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32);
+
 export class SaveRepository {
   private dbPromise: Promise<IDBPDatabase<MineblowDb>> | null = null;
+  private migrationPromise: Promise<void> | null = null;
 
   private getDb(): Promise<IDBPDatabase<MineblowDb>> {
     if (!this.dbPromise) {
-      this.dbPromise = openDB<MineblowDb>('mineblow', 2, {
+      this.dbPromise = openDB<MineblowDb>('mineblow', SAVE_CONFIG.databaseVersion, {
         upgrade(database) {
           if (!database.objectStoreNames.contains('meta')) {
             database.createObjectStore('meta');
@@ -61,6 +103,9 @@ export class SaveRepository {
           if (!database.objectStoreNames.contains('globalStats')) {
             database.createObjectStore('globalStats');
           }
+          if (!database.objectStoreNames.contains('worlds')) {
+            database.createObjectStore('worlds');
+          }
         },
       });
     }
@@ -68,59 +113,118 @@ export class SaveRepository {
   }
 
   async hasContinueState(): Promise<boolean> {
+    await this.ensureMigrated();
     const db = await this.getDb();
-    const save = await db.get('meta', SAVE_CONFIG.worldId);
-    return isWorldSave(save);
+    return (await db.count('worlds')) > 0;
   }
 
-  async loadWorld(): Promise<LoadedWorld | null> {
+  async listWorlds(): Promise<WorldSummary[]> {
+    await this.ensureMigrated();
     const db = await this.getDb();
-    const save = await db.get('meta', SAVE_CONFIG.worldId);
-    if (!isWorldSave(save)) {
+    const saves = await db.getAll('worlds');
+    return sortWorlds(saves.filter(isWorldSave).map((save) => toSummary(save)));
+  }
+
+  async loadWorld(worldId?: string): Promise<LoadedWorld | null> {
+    await this.ensureMigrated();
+    const db = await this.getDb();
+    const targetWorldId = worldId ?? (await this.getPreferredWorldId(db));
+    if (!targetWorldId) {
       return null;
     }
 
+    const transaction = db.transaction(['worlds', 'chunkDiffs', 'meta'], 'readwrite');
+    const worldStore = transaction.objectStore('worlds');
+    const save = await worldStore.get(targetWorldId);
+    if (!isWorldSave(save)) {
+      await transaction.done;
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const updatedSave: WorldSave = {
+      ...save,
+      updatedAt: now,
+      lastPlayedAt: now,
+    };
+    await worldStore.put(updatedSave, updatedSave.id);
+    await transaction.objectStore('meta').put(
+      {
+        schemaVersion: 1,
+        activeWorldId: updatedSave.id,
+        lastWorldId: updatedSave.id,
+      },
+      SAVE_CONFIG.appMetaKey,
+    );
+
     const chunkDiffs = new Map<string, ChunkDiffRecord>();
-    const diffRecords = await db.getAll('chunkDiffs');
+    const diffRecords = await transaction.objectStore('chunkDiffs').getAll();
     for (const record of diffRecords) {
-      if (isChunkDiffRecord(record)) {
-        chunkDiffs.set(record.chunkKey, record);
+      if (isStoredChunkDiffRecord(record) && record.worldId === updatedSave.id) {
+        chunkDiffs.set(record.chunkKey, {
+          chunkKey: record.chunkKey,
+          revision: record.revision,
+          changes: record.changes,
+        });
       }
     }
 
+    await transaction.done;
     return {
-      save,
+      save: updatedSave,
       chunkDiffs,
     };
   }
 
-  async loadWorldSummary(): Promise<WorldSave | null> {
+  async loadWorldSummary(worldId?: string): Promise<WorldSummary | null> {
+    await this.ensureMigrated();
     const db = await this.getDb();
-    const save = await db.get('meta', SAVE_CONFIG.worldId);
-    return isWorldSave(save) ? save : null;
+    const targetWorldId = worldId ?? (await this.getPreferredWorldId(db));
+    if (!targetWorldId) {
+      return null;
+    }
+
+    const save = await db.get('worlds', targetWorldId);
+    return isWorldSave(save) ? toSummary(save) : null;
   }
 
   async createNewWorld(
+    name: string,
     seed: string,
     player: PlayerState,
     inventory: InventorySlot[],
     worldStats: WorldStats,
-  ): Promise<void> {
+  ): Promise<WorldSave> {
+    await this.ensureMigrated();
     const db = await this.getDb();
-    const transaction = db.transaction(['meta', 'chunkDiffs', 'globalStats'], 'readwrite');
+    const now = new Date().toISOString();
+    const worldId = await this.createUniqueWorldId(name);
+    const worldName = name.trim() || `New World ${new Date().toLocaleDateString('en-CA')}`;
+    const save: WorldSave = {
+      schemaVersion: SAVE_CONFIG.schemaVersion,
+      id: worldId,
+      worldId,
+      name: worldName,
+      seed,
+      createdAt: now,
+      updatedAt: now,
+      lastPlayedAt: now,
+      player,
+      inventory,
+      worldStats,
+    };
+
+    const transaction = db.transaction(['worlds', 'meta', 'globalStats'], 'readwrite');
+    await transaction.objectStore('worlds').put(save, save.id);
     await transaction.objectStore('meta').put(
       {
-        schemaVersion: SAVE_CONFIG.schemaVersion,
-        worldId: SAVE_CONFIG.worldId,
-        seed,
-        createdAt: new Date().toISOString(),
-        player,
-        inventory,
-        worldStats,
+        schemaVersion: 1,
+        activeWorldId: save.id,
+        lastWorldId: save.id,
       },
-      SAVE_CONFIG.worldId,
+      SAVE_CONFIG.appMetaKey,
     );
-    await transaction.objectStore('chunkDiffs').clear();
+
     const currentGlobal = await transaction.objectStore('globalStats').get('global');
     const globalStats = isStoredGlobalStats(currentGlobal)
       ? currentGlobal
@@ -136,32 +240,96 @@ export class SaveRepository {
       'global',
     );
     await transaction.done;
+    return save;
+  }
+
+  async renameWorld(worldId: string, name: string): Promise<WorldSummary | null> {
+    await this.ensureMigrated();
+    const db = await this.getDb();
+    const save = await db.get('worlds', worldId);
+    if (!isWorldSave(save)) {
+      return null;
+    }
+
+    const nextName = name.trim();
+    if (!nextName) {
+      return toSummary(save);
+    }
+
+    const updated: WorldSave = {
+      ...save,
+      name: nextName,
+      updatedAt: new Date().toISOString(),
+    };
+    await db.put('worlds', updated, updated.id);
+    return toSummary(updated);
+  }
+
+  async deleteWorld(worldId: string): Promise<void> {
+    await this.ensureMigrated();
+    const db = await this.getDb();
+    const worlds = (await db.getAll('worlds')).filter(isWorldSave);
+    const appMeta = await this.loadAppMeta(db);
+    const remainingWorlds = worlds.filter((world) => world.id !== worldId);
+    const fallbackWorldId = sortWorlds(remainingWorlds.map((world) => toSummary(world)))[0]?.id ?? null;
+
+    const transaction = db.transaction(['worlds', 'chunkDiffs', 'meta'], 'readwrite');
+    await transaction.objectStore('worlds').delete(worldId);
+
+    const chunkStore = transaction.objectStore('chunkDiffs');
+    const keys = await chunkStore.getAllKeys();
+    const values = await chunkStore.getAll();
+    for (let index = 0; index < values.length; index += 1) {
+      const value = values[index];
+      const key = keys[index];
+      if (isStoredChunkDiffRecord(value) && value.worldId === worldId && typeof key === 'string') {
+        await chunkStore.delete(key);
+      }
+    }
+
+    const nextMeta: StoredAppMeta = {
+      schemaVersion: 1,
+      activeWorldId: appMeta.activeWorldId === worldId ? fallbackWorldId : appMeta.activeWorldId,
+      lastWorldId: appMeta.lastWorldId === worldId ? fallbackWorldId : appMeta.lastWorldId,
+    };
+    if (nextMeta.activeWorldId && !remainingWorlds.some((world) => world.id === nextMeta.activeWorldId)) {
+      nextMeta.activeWorldId = fallbackWorldId;
+    }
+    if (nextMeta.lastWorldId && !remainingWorlds.some((world) => world.id === nextMeta.lastWorldId)) {
+      nextMeta.lastWorldId = fallbackWorldId;
+    }
+    await transaction.objectStore('meta').put(nextMeta, SAVE_CONFIG.appMetaKey);
+    await transaction.done;
   }
 
   async savePlayer(
+    worldId: string,
     player: PlayerState,
     inventory: InventorySlot[],
     worldStats: WorldStats,
   ): Promise<void> {
+    await this.ensureMigrated();
     const db = await this.getDb();
-    const current = await db.get('meta', SAVE_CONFIG.worldId);
+    const current = await db.get('worlds', worldId);
     if (!isWorldSave(current)) {
       return;
     }
 
     await db.put(
-      'meta',
+      'worlds',
       {
         ...current,
         player,
         inventory,
         worldStats,
+        updatedAt: new Date().toISOString(),
       },
-      SAVE_CONFIG.worldId,
+      current.id,
     );
   }
 
-  async saveChunkDiffs(records: ChunkDiffRecord[]): Promise<void> {
+  async saveChunkDiffs(worldId: string, records: ChunkDiffRecord[]): Promise<void> {
+    await this.ensureMigrated();
     if (records.length === 0) {
       return;
     }
@@ -171,10 +339,20 @@ export class SaveRepository {
     const store = transaction.objectStore('chunkDiffs');
 
     for (const record of records) {
+      const recordKey = this.getChunkRecordKey(worldId, record.chunkKey);
       if (record.changes.length === 0) {
-        await store.delete(record.chunkKey);
+        await store.delete(recordKey);
       } else {
-        await store.put(record, record.chunkKey);
+        await store.put(
+          {
+            id: recordKey,
+            worldId,
+            chunkKey: record.chunkKey,
+            revision: record.revision,
+            changes: record.changes,
+          },
+          recordKey,
+        );
       }
     }
 
@@ -183,9 +361,11 @@ export class SaveRepository {
 
   async clear(): Promise<void> {
     const db = await this.getDb();
-    const transaction = db.transaction(['meta', 'chunkDiffs'], 'readwrite');
-    await transaction.objectStore('meta').delete(SAVE_CONFIG.worldId);
+    const transaction = db.transaction(['worlds', 'chunkDiffs', 'meta'], 'readwrite');
+    await transaction.objectStore('worlds').clear();
     await transaction.objectStore('chunkDiffs').clear();
+    await transaction.objectStore('meta').delete(SAVE_CONFIG.appMetaKey);
+    await transaction.objectStore('meta').delete(SAVE_CONFIG.legacyWorldId);
     await transaction.done;
   }
 
@@ -246,5 +426,128 @@ export class SaveRepository {
       },
       'global',
     );
+  }
+
+  private async ensureMigrated(): Promise<void> {
+    if (!this.migrationPromise) {
+      this.migrationPromise = this.runMigration();
+    }
+    await this.migrationPromise;
+  }
+
+  private async runMigration(): Promise<void> {
+    const db = await this.getDb();
+    const existingWorlds = (await db.getAll('worlds')).filter(isWorldSave);
+    const appMetaValue = await db.get('meta', SAVE_CONFIG.appMetaKey);
+    if (existingWorlds.length > 0) {
+      if (!isStoredAppMeta(appMetaValue)) {
+        const latestWorldId = sortWorlds(existingWorlds.map((world) => toSummary(world)))[0]?.id ?? null;
+        await db.put(
+          'meta',
+          {
+            schemaVersion: 1,
+            activeWorldId: latestWorldId,
+            lastWorldId: latestWorldId,
+          },
+          SAVE_CONFIG.appMetaKey,
+        );
+      }
+      return;
+    }
+
+    const legacyValue: unknown = await db.get('meta', SAVE_CONFIG.legacyWorldId);
+    if (!isLegacyWorldSave(legacyValue)) {
+      if (!isStoredAppMeta(appMetaValue)) {
+        await db.put('meta', DEFAULT_APP_META, SAVE_CONFIG.appMetaKey);
+      }
+      return;
+    }
+
+    const migratedWorld: WorldSave = {
+      schemaVersion: SAVE_CONFIG.schemaVersion,
+      id: SAVE_CONFIG.legacyWorldId,
+      worldId: SAVE_CONFIG.legacyWorldId,
+      name: 'Imported World',
+      seed: legacyValue.seed,
+      createdAt: legacyValue.createdAt,
+      updatedAt: legacyValue.createdAt,
+      lastPlayedAt: legacyValue.createdAt,
+      player: legacyValue.player as PlayerState,
+      inventory: legacyValue.inventory as InventorySlot[],
+      worldStats: legacyValue.worldStats,
+    };
+
+    const transaction = db.transaction(['worlds', 'chunkDiffs', 'meta'], 'readwrite');
+    await transaction.objectStore('worlds').put(migratedWorld, migratedWorld.id);
+
+    const chunkStore = transaction.objectStore('chunkDiffs');
+    const keys = await chunkStore.getAllKeys();
+    const values = await chunkStore.getAll();
+    for (let index = 0; index < values.length; index += 1) {
+      const value = values[index];
+      const key = keys[index];
+      if (!isChunkDiffRecord(value) || isStoredChunkDiffRecord(value)) {
+        continue;
+      }
+
+      const recordKey = this.getChunkRecordKey(migratedWorld.id, value.chunkKey);
+      await chunkStore.put(
+        {
+          id: recordKey,
+          worldId: migratedWorld.id,
+          chunkKey: value.chunkKey,
+          revision: value.revision,
+          changes: value.changes,
+        },
+        recordKey,
+      );
+      if (typeof key === 'string' && key !== recordKey) {
+        await chunkStore.delete(key);
+      }
+    }
+
+    await transaction.objectStore('meta').put(
+      {
+        schemaVersion: 1,
+        activeWorldId: migratedWorld.id,
+        lastWorldId: migratedWorld.id,
+      },
+      SAVE_CONFIG.appMetaKey,
+    );
+    await transaction.objectStore('meta').delete(SAVE_CONFIG.legacyWorldId);
+    await transaction.done;
+  }
+
+  private async createUniqueWorldId(name: string): Promise<string> {
+    const db = await this.getDb();
+    const base = slugify(name) || 'world';
+    let candidate = base;
+    let suffix = 1;
+    while (await db.get('worlds', candidate)) {
+      suffix += 1;
+      candidate = `${base}-${suffix}`;
+    }
+    return candidate;
+  }
+
+  private async getPreferredWorldId(db: IDBPDatabase<MineblowDb>): Promise<string | null> {
+    const meta = await this.loadAppMeta(db);
+    if (meta.activeWorldId) {
+      return meta.activeWorldId;
+    }
+    if (meta.lastWorldId) {
+      return meta.lastWorldId;
+    }
+    const worlds = (await db.getAll('worlds')).filter(isWorldSave).map((world) => toSummary(world));
+    return sortWorlds(worlds)[0]?.id ?? null;
+  }
+
+  private async loadAppMeta(db: IDBPDatabase<MineblowDb>): Promise<StoredAppMeta> {
+    const value = await db.get('meta', SAVE_CONFIG.appMetaKey);
+    return isStoredAppMeta(value) ? value : DEFAULT_APP_META;
+  }
+
+  private getChunkRecordKey(worldId: string, chunkKey: string): string {
+    return `${worldId}:${chunkKey}`;
   }
 }
