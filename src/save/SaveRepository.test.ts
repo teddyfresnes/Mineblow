@@ -39,6 +39,7 @@ describe('SaveRepository', () => {
         changes: [{ index: 12, blockId: 0 }],
       },
     ]);
+    await repository.saveWorldPreview(created.id, 'data:image/png;base64,test');
 
     const loaded = await repository.loadWorld(created.id);
     const worlds = await repository.listWorlds();
@@ -50,6 +51,7 @@ describe('SaveRepository', () => {
     });
     expect(loaded?.save.worldStats.blocksMined).toBe(2);
     expect(worlds).toHaveLength(1);
+    expect(worlds[0]?.previewImageDataUrl).toBe('data:image/png;base64,test');
     expect(loaded?.chunkDiffs.get('0,0')).toEqual({
       chunkKey: '0,0',
       revision: 1,

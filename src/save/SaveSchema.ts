@@ -96,6 +96,7 @@ export const isWorldSave = (value: unknown): value is WorldSave => {
   }
 
   const candidate = value as WorldSave;
+  const previewImageDataUrl = (candidate as { previewImageDataUrl?: unknown }).previewImageDataUrl;
   return (
     candidate.schemaVersion === 5 &&
     typeof candidate.id === 'string' &&
@@ -105,6 +106,7 @@ export const isWorldSave = (value: unknown): value is WorldSave => {
     typeof candidate.name === 'string' &&
     candidate.name.length > 0 &&
     typeof candidate.seed === 'string' &&
+    (typeof previewImageDataUrl === 'undefined' || isStringOrNull(previewImageDataUrl)) &&
     isIsoString(candidate.createdAt) &&
     isIsoString(candidate.updatedAt) &&
     isIsoString(candidate.lastPlayedAt) &&
@@ -185,7 +187,11 @@ export const isStoredSettings = (value: unknown): value is StoredSettings => {
     );
   });
 
-  return hasAllBindings && isStringOrNull(candidate.skinDataUrl);
+  return (
+    hasAllBindings &&
+    isStringOrNull(candidate.skinDataUrl) &&
+    (typeof candidate.startFullscreen === 'boolean' || typeof candidate.startFullscreen === 'undefined')
+  );
 };
 
 export const isStoredGlobalStats = (value: unknown): value is StoredGlobalStats => {

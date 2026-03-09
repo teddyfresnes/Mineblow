@@ -69,6 +69,7 @@ const toSummary = (save: WorldSave): WorldSummary => ({
   id: save.id,
   name: save.name,
   seed: save.seed,
+  previewImageDataUrl: save.previewImageDataUrl ?? null,
   createdAt: save.createdAt,
   updatedAt: save.updatedAt,
   lastPlayedAt: save.lastPlayedAt,
@@ -206,6 +207,7 @@ export class SaveRepository {
       worldId,
       name: worldName,
       seed,
+      previewImageDataUrl: null,
       createdAt: now,
       updatedAt: now,
       lastPlayedAt: now,
@@ -263,6 +265,29 @@ export class SaveRepository {
     };
     await db.put('worlds', updated, updated.id);
     return toSummary(updated);
+  }
+
+  async saveWorldPreview(worldId: string, previewImageDataUrl: string | null): Promise<void> {
+    await this.ensureMigrated();
+    const db = await this.getDb();
+    const save = await db.get('worlds', worldId);
+    if (!isWorldSave(save)) {
+      return;
+    }
+
+    const normalizedPreview =
+      typeof previewImageDataUrl === 'string' && previewImageDataUrl.length > 0
+        ? previewImageDataUrl
+        : null;
+    await db.put(
+      'worlds',
+      {
+        ...save,
+        previewImageDataUrl: normalizedPreview,
+        updatedAt: new Date().toISOString(),
+      },
+      save.id,
+    );
   }
 
   async deleteWorld(worldId: string): Promise<void> {
@@ -376,6 +401,7 @@ export class SaveRepository {
       return {
         keyBindings: settings.keyBindings,
         skinDataUrl: settings.skinDataUrl,
+        startFullscreen: settings.startFullscreen ?? true,
       };
     }
 
@@ -469,6 +495,7 @@ export class SaveRepository {
       worldId: SAVE_CONFIG.legacyWorldId,
       name: 'Imported World',
       seed: legacyValue.seed,
+      previewImageDataUrl: null,
       createdAt: legacyValue.createdAt,
       updatedAt: legacyValue.createdAt,
       lastPlayedAt: legacyValue.createdAt,

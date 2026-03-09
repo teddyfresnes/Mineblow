@@ -129,6 +129,7 @@ export class Renderer {
     this.renderer = new WebGLRenderer({
       canvas,
       antialias: false,
+      preserveDrawingBuffer: true,
       powerPreference: 'high-performance',
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));

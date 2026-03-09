@@ -72,11 +72,16 @@ const EMPTY_CURSOR: InventorySlot = {
 const PRIMARY_MINING_HOLD_MS = 120;
 const PRIMARY_PUNCH_LOCK_MS = 0;
 const MENU_MUSIC_URL = new URL('../../assets/sounds/menu/menu.mp3', import.meta.url).href;
-const INTRO_SPLASH_DURATION_MS = 3800;
+const INTRO_SPLASH_DURATION_MS = 4600;
+const INTRO_SPLASH_BEFORE_MENU_MS = 700;
+const WORLD_PREVIEW_CAPTURE_DELAY_FRAMES = 16;
+const WORLD_PREVIEW_SIZE = 256;
 
 export class Game {
   private readonly shell = document.createElement('div');
   private readonly canvas = document.createElement('canvas');
+  private readonly entryGate = document.createElement('div');
+  private readonly entryGateButton = document.createElement('button');
   private readonly introSplash = document.createElement('div');
   private readonly renderer: Renderer;
   private readonly input: InputController;
@@ -112,20 +117,38 @@ export class Game {
   private wasPrimaryDown = false;
   private dropSequence = 0;
   private menuMusicUnlockRegistered = false;
+  private entryGateReady = false;
+  private entryGateActivated = false;
+  private entryGateDelayElapsed = false;
+  private entryGateDismissed = false;
+  private introSplashTimeoutId: number | null = null;
+  private entryGateDelayTimeoutId: number | null = null;
+  private pendingWorldPreviewCapture: { worldId: string; framesRemaining: number } | null = null;
   private readonly droppedItems = new Map<string, DroppedItem>();
 
   constructor(private readonly root: HTMLElement) {
     this.shell.className = 'mineblow-shell';
     this.canvas.className = 'mineblow-canvas';
+    this.entryGate.className = 'entry-gate';
+    this.entryGateButton.type = 'button';
+    this.entryGateButton.className = 'entry-gate-button';
+    this.entryGateButton.textContent = 'Cliquez pour acceder a Mineblow';
+    this.entryGateButton.disabled = true;
     this.introSplash.className = 'intro-splash';
     this.introSplash.textContent = 'made by teddyfresnes';
     this.shell.append(this.canvas);
-    this.shell.append(this.introSplash);
+    const entryGateBody = document.createElement('div');
+    entryGateBody.className = 'entry-gate-body';
+    entryGateBody.append(this.entryGateButton);
+    this.entryGate.append(entryGateBody);
+    this.shell.append(this.entryGate, this.introSplash);
     this.root.append(this.shell);
 
     this.menuMusic.loop = true;
     this.menuMusic.volume = 0.42;
     this.handleMenuMusicUnlock = this.handleMenuMusicUnlock.bind(this);
+    this.handleEntryGateClick = this.handleEntryGateClick.bind(this);
+    this.entryGateButton.addEventListener('click', this.handleEntryGateClick);
 
     this.renderer = new Renderer(this.canvas);
     this.input = new InputController(this.canvas);
@@ -145,6 +168,7 @@ export class Game {
         this.applySettings({
           keyBindings: cloneBindings(this.settings.keyBindings),
           skinDataUrl,
+          startFullscreen: this.settings.startFullscreen,
         });
       },
     });
@@ -176,9 +200,6 @@ export class Game {
     this.handleResize = this.handleResize.bind(this);
     this.handleBeforeUnload = this.handleBeforeUnload.bind(this);
     this.handlePointerLockChange = this.handlePointerLockChange.bind(this);
-    window.setTimeout(() => {
-      this.introSplash.remove();
-    }, INTRO_SPLASH_DURATION_MS);
   }
 
   async bootstrap(): Promise<void> {
@@ -201,8 +222,11 @@ export class Game {
     this.menu.setGlobalStats(globalStats);
     this.menu.setWorlds(worlds);
     this.hud.setHandSkin(settings.skinDataUrl);
-    this.menu.showBoot();
-    void this.playMenuMusic();
+    this.entryGateReady = true;
+    this.entryGateButton.disabled = false;
+    if (this.entryGateActivated) {
+      this.finishEntryGate();
+    }
     this.gameLoop.start();
   }
 
@@ -248,6 +272,7 @@ export class Game {
     }
 
     this.session = null;
+    this.pendingWorldPreviewCapture = null;
     this.input.exitPointerLock();
     this.inventoryScreen.setVisible(false);
     this.inventoryCursor = { ...EMPTY_CURSOR };
@@ -383,6 +408,7 @@ export class Game {
       session.inventory.getSelectedHotbarIndex(),
     );
     this.hud.setGenerating(session.world.hasPendingGeneration() || session.world.hasPendingMeshes());
+    this.queueWorldPreviewCapture(session.id);
     await this.resumeSession();
   }
 
@@ -606,6 +632,70 @@ export class Game {
     }
 
     this.renderer.render();
+    this.capturePendingWorldPreview();
+  }
+
+  private queueWorldPreviewCapture(worldId: string): void {
+    this.pendingWorldPreviewCapture = {
+      worldId,
+      framesRemaining: WORLD_PREVIEW_CAPTURE_DELAY_FRAMES,
+    };
+  }
+
+  private capturePendingWorldPreview(): void {
+    const pending = this.pendingWorldPreviewCapture;
+    if (!pending) {
+      return;
+    }
+    if (!this.session || this.session.id !== pending.worldId) {
+      this.pendingWorldPreviewCapture = null;
+      return;
+    }
+
+    if (pending.framesRemaining > 0) {
+      pending.framesRemaining -= 1;
+      return;
+    }
+
+    this.pendingWorldPreviewCapture = null;
+    const preview = this.captureWorldPreviewPng();
+    if (!preview) {
+      return;
+    }
+    void this.saveRepository.saveWorldPreview(pending.worldId, preview);
+  }
+
+  private captureWorldPreviewPng(): string | null {
+    const sourceWidth = this.canvas.width;
+    const sourceHeight = this.canvas.height;
+    if (sourceWidth < 8 || sourceHeight < 8) {
+      return null;
+    }
+
+    const squareSize = Math.min(sourceWidth, sourceHeight);
+    const sourceX = Math.floor((sourceWidth - squareSize) * 0.5);
+    const sourceY = Math.floor((sourceHeight - squareSize) * 0.5);
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.width = WORLD_PREVIEW_SIZE;
+    previewCanvas.height = WORLD_PREVIEW_SIZE;
+    const context = previewCanvas.getContext('2d');
+    if (!context) {
+      return null;
+    }
+
+    context.imageSmoothingEnabled = true;
+    context.drawImage(
+      this.canvas,
+      sourceX,
+      sourceY,
+      squareSize,
+      squareSize,
+      0,
+      0,
+      WORLD_PREVIEW_SIZE,
+      WORLD_PREVIEW_SIZE,
+    );
+    return previewCanvas.toDataURL('image/png');
   }
 
   private handleInteractions(dt: number, canUsePrimary: boolean): void {
@@ -958,6 +1048,14 @@ export class Game {
   }
 
   private handleBeforeUnload(): void {
+    if (this.introSplashTimeoutId !== null) {
+      window.clearTimeout(this.introSplashTimeoutId);
+      this.introSplashTimeoutId = null;
+    }
+    if (this.entryGateDelayTimeoutId !== null) {
+      window.clearTimeout(this.entryGateDelayTimeoutId);
+      this.entryGateDelayTimeoutId = null;
+    }
     this.stopMenuMusic();
     void this.flushSaves();
   }
@@ -968,6 +1066,10 @@ export class Game {
     }
 
     await this.persistProfile(true);
+    const preview = this.captureWorldPreviewPng();
+    if (preview) {
+      await this.saveRepository.saveWorldPreview(this.session.id, preview);
+    }
     await this.saveRepository.saveChunkDiffs(this.session.id, this.session.world.getAllDiffRecords());
   }
 
@@ -1141,6 +1243,7 @@ export class Game {
     this.settings = {
       keyBindings: cloneBindings(settings.keyBindings),
       skinDataUrl: settings.skinDataUrl,
+      startFullscreen: settings.startFullscreen,
     };
     this.menu.setSettings(this.settings);
     this.hud.setHandSkin(this.settings.skinDataUrl);
@@ -1320,5 +1423,65 @@ export class Game {
 
   private handleMenuMusicUnlock(): void {
     void this.playMenuMusic();
+  }
+
+  private handleEntryGateClick(): void {
+    if (this.entryGateDismissed || this.entryGateActivated) {
+      return;
+    }
+
+    this.entryGateActivated = true;
+    this.entryGateDelayElapsed = false;
+    this.entryGateButton.disabled = true;
+    this.entryGateButton.textContent = this.entryGateReady ? 'Acces...' : 'Chargement...';
+    if (this.settings.startFullscreen) {
+      void this.requestFullscreen();
+    }
+    this.showIntroSplash();
+    if (this.entryGateDelayTimeoutId !== null) {
+      window.clearTimeout(this.entryGateDelayTimeoutId);
+    }
+    this.entryGateDelayTimeoutId = window.setTimeout(() => {
+      this.entryGateDelayElapsed = true;
+      this.entryGateDelayTimeoutId = null;
+      this.finishEntryGate();
+    }, INTRO_SPLASH_BEFORE_MENU_MS);
+    void this.playMenuMusic();
+    this.finishEntryGate();
+  }
+
+  private finishEntryGate(): void {
+    if (!this.entryGateReady || this.entryGateDismissed || !this.entryGateActivated || !this.entryGateDelayElapsed) {
+      return;
+    }
+    this.entryGateDismissed = true;
+    this.entryGate.remove();
+    this.menu.showBoot();
+  }
+
+  private showIntroSplash(): void {
+    this.introSplash.classList.remove('active');
+    void this.introSplash.offsetWidth;
+    this.introSplash.classList.add('active');
+
+    if (this.introSplashTimeoutId !== null) {
+      window.clearTimeout(this.introSplashTimeoutId);
+    }
+    this.introSplashTimeoutId = window.setTimeout(() => {
+      this.introSplash.classList.remove('active');
+      this.introSplashTimeoutId = null;
+    }, INTRO_SPLASH_DURATION_MS);
+  }
+
+  private async requestFullscreen(): Promise<void> {
+    if (document.fullscreenElement) {
+      return;
+    }
+
+    try {
+      await this.shell.requestFullscreen();
+    } catch {
+      // Ignore unsupported or denied fullscreen requests.
+    }
   }
 }

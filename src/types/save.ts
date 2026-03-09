@@ -41,6 +41,7 @@ export interface WorldSummary {
   id: string;
   name: string;
   seed: string;
+  previewImageDataUrl: string | null;
   createdAt: string;
   updatedAt: string;
   lastPlayedAt: string;
