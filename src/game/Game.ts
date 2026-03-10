@@ -48,6 +48,8 @@ import { VoxelRaycaster } from '../world/VoxelRaycaster';
 import { World } from '../world/World';
 
 interface Session {
+  id: string;
+  name: string;
   seed: string;
   world: World;
   player: PlayerController;
@@ -69,10 +71,18 @@ const EMPTY_CURSOR: InventorySlot = {
 };
 const PRIMARY_MINING_HOLD_MS = 120;
 const PRIMARY_PUNCH_LOCK_MS = 0;
+const MENU_MUSIC_URL = new URL('../../assets/sounds/menu/menu.mp3', import.meta.url).href;
+const INTRO_SPLASH_DURATION_MS = 4600;
+const INTRO_SPLASH_BEFORE_MENU_MS = 700;
+const WORLD_PREVIEW_CAPTURE_DELAY_FRAMES = 16;
+const WORLD_PREVIEW_SIZE = 256;
 
 export class Game {
   private readonly shell = document.createElement('div');
   private readonly canvas = document.createElement('canvas');
+  private readonly entryGate = document.createElement('div');
+  private readonly entryGateButton = document.createElement('button');
+  private readonly introSplash = document.createElement('div');
   private readonly renderer: Renderer;
   private readonly input: InputController;
   private readonly menu: StartMenu;
@@ -81,6 +91,7 @@ export class Game {
   private readonly inventoryScreen: InventoryScreen;
   private readonly saveRepository = new SaveRepository();
   private readonly gameLoop: GameLoop;
+  private readonly menuMusic = new Audio(MENU_MUSIC_URL);
   private readonly persistDirtyChunks = debounce(() => {
     void this.saveDirtyChunks();
   }, SAVE_CONFIG.worldSaveDebounceMs);
@@ -105,13 +116,39 @@ export class Game {
   private primaryPunchLockMs = 0;
   private wasPrimaryDown = false;
   private dropSequence = 0;
+  private menuMusicUnlockRegistered = false;
+  private entryGateReady = false;
+  private entryGateActivated = false;
+  private entryGateDelayElapsed = false;
+  private entryGateDismissed = false;
+  private introSplashTimeoutId: number | null = null;
+  private entryGateDelayTimeoutId: number | null = null;
+  private pendingWorldPreviewCapture: { worldId: string; framesRemaining: number } | null = null;
   private readonly droppedItems = new Map<string, DroppedItem>();
 
   constructor(private readonly root: HTMLElement) {
     this.shell.className = 'mineblow-shell';
     this.canvas.className = 'mineblow-canvas';
+    this.entryGate.className = 'entry-gate';
+    this.entryGateButton.type = 'button';
+    this.entryGateButton.className = 'entry-gate-button';
+    this.entryGateButton.textContent = 'Cliquez pour acceder a Mineblow';
+    this.entryGateButton.disabled = true;
+    this.introSplash.className = 'intro-splash';
+    this.introSplash.textContent = 'made by teddyfresnes';
     this.shell.append(this.canvas);
+    const entryGateBody = document.createElement('div');
+    entryGateBody.className = 'entry-gate-body';
+    entryGateBody.append(this.entryGateButton);
+    this.entryGate.append(entryGateBody);
+    this.shell.append(this.entryGate, this.introSplash);
     this.root.append(this.shell);
+
+    this.menuMusic.loop = true;
+    this.menuMusic.volume = 0.42;
+    this.handleMenuMusicUnlock = this.handleMenuMusicUnlock.bind(this);
+    this.handleEntryGateClick = this.handleEntryGateClick.bind(this);
+    this.entryGateButton.addEventListener('click', this.handleEntryGateClick);
 
     this.renderer = new Renderer(this.canvas);
     this.input = new InputController(this.canvas);
@@ -131,18 +168,28 @@ export class Game {
         this.applySettings({
           keyBindings: cloneBindings(this.settings.keyBindings),
           skinDataUrl,
+          startFullscreen: this.settings.startFullscreen,
         });
       },
     });
     this.menu = new StartMenu(this.shell, {
-      onContinue: () => {
-        void this.continueWorld();
+      onPlayWorld: (worldId) => {
+        void this.loadWorld(worldId);
       },
-      onNewGame: (seed) => {
-        void this.startNewWorld(seed);
+      onCreateWorld: (name, seed) => {
+        void this.startNewWorld(name, seed);
+      },
+      onRenameWorld: (worldId, name) => {
+        void this.renameWorld(worldId, name);
+      },
+      onDeleteWorld: (worldId) => {
+        void this.deleteWorld(worldId);
       },
       onResume: () => {
         void this.resumeSession();
+      },
+      onQuitToTitle: () => {
+        void this.quitToTitle();
       },
       onSettingsChange: (settings) => {
         this.applySettings(settings);
@@ -163,25 +210,94 @@ export class Game {
     window.addEventListener('resize', this.handleResize);
     window.addEventListener('beforeunload', this.handleBeforeUnload);
 
-    const [continueAvailable, settings, globalStats, worldSummary] = await Promise.all([
-      this.saveRepository.hasContinueState(),
+    const [settings, globalStats, worlds] = await Promise.all([
       this.saveRepository.loadSettings(),
       this.saveRepository.loadGlobalStats(),
-      this.saveRepository.loadWorldSummary(),
+      this.saveRepository.listWorlds(),
     ]);
 
     this.settings = settings;
     this.globalStats = globalStats;
-    this.menu.setContinueAvailable(continueAvailable);
     this.menu.setSettings(settings);
     this.menu.setGlobalStats(globalStats);
-    this.menu.setWorldStats(worldSummary ? this.normalizeWorldStats(worldSummary.worldStats) : null);
+    this.menu.setWorlds(worlds);
     this.hud.setHandSkin(settings.skinDataUrl);
-    this.menu.showBoot();
+    this.entryGateReady = true;
+    this.entryGateButton.disabled = false;
+    if (this.entryGateActivated) {
+      this.finishEntryGate();
+    }
     this.gameLoop.start();
   }
 
-  private async startNewWorld(seedInput: string): Promise<void> {
+  private async refreshMenuWorlds(selectedWorldId?: string | null): Promise<void> {
+    const worlds = await this.saveRepository.listWorlds();
+    this.menu.setWorlds(worlds);
+    if (selectedWorldId !== undefined) {
+      this.menu.setSelectedWorld(selectedWorldId);
+    }
+  }
+
+  private async renameWorld(worldId: string, name: string): Promise<void> {
+    const renamed = await this.saveRepository.renameWorld(worldId, name);
+    await this.refreshMenuWorlds(renamed?.id ?? worldId);
+    if (this.session && this.session.id === worldId && renamed) {
+      this.session.name = renamed.name;
+      this.updatePauseMenuSnapshot();
+    }
+  }
+
+  private async deleteWorld(worldId: string): Promise<void> {
+    await this.saveRepository.deleteWorld(worldId);
+    await this.refreshMenuWorlds();
+  }
+
+  private updatePauseMenuSnapshot(): void {
+    if (!this.session) {
+      this.menu.setPauseWorld(null);
+      return;
+    }
+
+    this.menu.setPauseWorld({
+      id: this.session.id,
+      name: this.session.name,
+      seed: this.session.seed,
+      worldStats: this.session.worldStats,
+    });
+  }
+
+  private async quitToTitle(): Promise<void> {
+    if (this.session) {
+      await this.flushSaves();
+    }
+
+    this.session = null;
+    this.pendingWorldPreviewCapture = null;
+    this.input.exitPointerLock();
+    this.inventoryScreen.setVisible(false);
+    this.inventoryCursor = { ...EMPTY_CURSOR };
+    this.targetHit = null;
+    this.miningTargetKey = null;
+    this.miningProgressMs = 0;
+    this.primaryHoldMs = 0;
+    this.primaryPunchPending = false;
+    this.primaryPunchLockMs = 0;
+    this.wasPrimaryDown = false;
+    this.dropSequence = 0;
+    this.droppedItems.clear();
+    this.renderer.clearChunks();
+    this.renderer.clearDroppedItems();
+    this.renderer.setMiningOverlay(null, 0);
+    this.hud.setMiningProgress(0);
+    this.hud.setVisible(false);
+    this.menu.setGlobalStats(this.globalStats);
+    this.menu.setPauseWorld(null);
+    await this.refreshMenuWorlds();
+    this.menu.showBoot();
+    void this.playMenuMusic();
+  }
+
+  private async startNewWorld(nameInput: string, seedInput: string): Promise<void> {
     const seed = seedInput || `mineblow-${Date.now().toString(36)}`;
     this.renderer.clearChunks();
 
@@ -199,25 +315,31 @@ export class Game {
     const inventory = new Inventory();
     const worldStats = createEmptyWorldStats();
 
-    await this.saveRepository.clear();
-    await this.saveRepository.createNewWorld(seed, playerState, inventory.snapshot(), worldStats);
+    const createdWorld = await this.saveRepository.createNewWorld(
+      nameInput,
+      seed,
+      playerState,
+      inventory.snapshot(),
+      worldStats,
+    );
     this.globalStats = await this.saveRepository.loadGlobalStats();
     this.menu.setGlobalStats(this.globalStats);
-    this.menu.setWorldStats(worldStats);
+    await this.refreshMenuWorlds(createdWorld.id);
     await this.activateSession({
+      id: createdWorld.id,
+      name: createdWorld.name,
       seed,
       world,
       player: new PlayerController(playerState),
       inventory,
       worldStats,
     });
-    this.menu.setContinueAvailable(true);
   }
 
-  private async continueWorld(): Promise<void> {
-    const loaded = await this.saveRepository.loadWorld();
+  private async loadWorld(worldId: string): Promise<void> {
+    const loaded = await this.saveRepository.loadWorld(worldId);
     if (!loaded) {
-      this.menu.setContinueAvailable(false);
+      await this.refreshMenuWorlds();
       this.menu.showBoot();
       return;
     }
@@ -233,18 +355,21 @@ export class Game {
     const playerState = this.createSafePlayerState(loaded.save.player, world);
     const inventory = new Inventory(loaded.save.inventory, playerState.selectedSlot);
     const worldStats = this.normalizeWorldStats(loaded.save.worldStats);
+    await this.refreshMenuWorlds(loaded.save.id);
     await this.activateSession({
+      id: loaded.save.id,
+      name: loaded.save.name,
       seed: loaded.save.seed,
       world,
       player: new PlayerController(playerState),
       inventory,
       worldStats,
     });
-    this.menu.setWorldStats(worldStats);
   }
 
   private async activateSession(session: Session): Promise<void> {
     this.session = session;
+    this.stopMenuMusic();
     this.savePlayerElapsedMs = 0;
     this.statsPanelRefreshElapsedMs = 0;
     this.miningTargetKey = null;
@@ -271,12 +396,19 @@ export class Game {
     this.hud.setVisible(true);
     this.hud.setHandSkin(this.settings.skinDataUrl);
     this.renderer.setPlayerSkin(this.settings.skinDataUrl);
+    this.menu.setPauseWorld({
+      id: session.id,
+      name: session.name,
+      seed: session.seed,
+      worldStats: session.worldStats,
+    });
     this.updateFirstPersonHandVisibility(session.inventory);
     this.hud.updateHotbar(
       session.inventory.getHotbarSlots(),
       session.inventory.getSelectedHotbarIndex(),
     );
     this.hud.setGenerating(session.world.hasPendingGeneration() || session.world.hasPendingMeshes());
+    this.queueWorldPreviewCapture(session.id);
     await this.resumeSession();
   }
 
@@ -286,6 +418,7 @@ export class Game {
     try {
       await this.input.requestPointerLock();
     } catch {
+      this.updatePauseMenuSnapshot();
       this.menu.showPause();
     }
   }
@@ -327,7 +460,7 @@ export class Game {
       return;
     }
 
-    const { world, player, inventory, worldStats } = this.session;
+    const { world, player, inventory } = this.session;
 
     if (
       pausePressed &&
@@ -336,6 +469,7 @@ export class Game {
       !this.menu.isVisible()
     ) {
       this.input.exitPointerLock();
+      this.updatePauseMenuSnapshot();
       this.menu.showPause();
       this.hud.setVisible(false);
     }
@@ -472,7 +606,7 @@ export class Game {
     if (this.statsPanelRefreshElapsedMs >= 500) {
       this.statsPanelRefreshElapsedMs = 0;
       this.menu.setGlobalStats(this.globalStats);
-      this.menu.setWorldStats(worldStats);
+      this.updatePauseMenuSnapshot();
     }
 
     const [playerX, playerY, playerZ] = player.getPosition();
@@ -498,6 +632,70 @@ export class Game {
     }
 
     this.renderer.render();
+    this.capturePendingWorldPreview();
+  }
+
+  private queueWorldPreviewCapture(worldId: string): void {
+    this.pendingWorldPreviewCapture = {
+      worldId,
+      framesRemaining: WORLD_PREVIEW_CAPTURE_DELAY_FRAMES,
+    };
+  }
+
+  private capturePendingWorldPreview(): void {
+    const pending = this.pendingWorldPreviewCapture;
+    if (!pending) {
+      return;
+    }
+    if (!this.session || this.session.id !== pending.worldId) {
+      this.pendingWorldPreviewCapture = null;
+      return;
+    }
+
+    if (pending.framesRemaining > 0) {
+      pending.framesRemaining -= 1;
+      return;
+    }
+
+    this.pendingWorldPreviewCapture = null;
+    const preview = this.captureWorldPreviewPng();
+    if (!preview) {
+      return;
+    }
+    void this.saveRepository.saveWorldPreview(pending.worldId, preview);
+  }
+
+  private captureWorldPreviewPng(): string | null {
+    const sourceWidth = this.canvas.width;
+    const sourceHeight = this.canvas.height;
+    if (sourceWidth < 8 || sourceHeight < 8) {
+      return null;
+    }
+
+    const squareSize = Math.min(sourceWidth, sourceHeight);
+    const sourceX = Math.floor((sourceWidth - squareSize) * 0.5);
+    const sourceY = Math.floor((sourceHeight - squareSize) * 0.5);
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.width = WORLD_PREVIEW_SIZE;
+    previewCanvas.height = WORLD_PREVIEW_SIZE;
+    const context = previewCanvas.getContext('2d');
+    if (!context) {
+      return null;
+    }
+
+    context.imageSmoothingEnabled = true;
+    context.drawImage(
+      this.canvas,
+      sourceX,
+      sourceY,
+      squareSize,
+      squareSize,
+      0,
+      0,
+      WORLD_PREVIEW_SIZE,
+      WORLD_PREVIEW_SIZE,
+    );
+    return previewCanvas.toDataURL('image/png');
   }
 
   private handleInteractions(dt: number, canUsePrimary: boolean): void {
@@ -734,7 +932,7 @@ export class Game {
       return;
     }
 
-    await this.saveRepository.saveChunkDiffs(records);
+    await this.saveRepository.saveChunkDiffs(this.session.id, records);
   }
 
   private resetMining(): void {
@@ -843,13 +1041,22 @@ export class Game {
 
     if (!this.menu.isVisible()) {
       this.menu.setGlobalStats(this.globalStats);
-      this.menu.setWorldStats(this.session.worldStats);
+      this.updatePauseMenuSnapshot();
       this.menu.showPause();
       this.hud.setVisible(false);
     }
   }
 
   private handleBeforeUnload(): void {
+    if (this.introSplashTimeoutId !== null) {
+      window.clearTimeout(this.introSplashTimeoutId);
+      this.introSplashTimeoutId = null;
+    }
+    if (this.entryGateDelayTimeoutId !== null) {
+      window.clearTimeout(this.entryGateDelayTimeoutId);
+      this.entryGateDelayTimeoutId = null;
+    }
+    this.stopMenuMusic();
     void this.flushSaves();
   }
 
@@ -859,7 +1066,11 @@ export class Game {
     }
 
     await this.persistProfile(true);
-    await this.saveRepository.saveChunkDiffs(this.session.world.getAllDiffRecords());
+    const preview = this.captureWorldPreviewPng();
+    if (preview) {
+      await this.saveRepository.saveWorldPreview(this.session.id, preview);
+    }
+    await this.saveRepository.saveChunkDiffs(this.session.id, this.session.world.getAllDiffRecords());
   }
 
   private spawnDroppedItem(blockId: BlockId, x: number, y: number, z: number): void {
@@ -1017,6 +1228,7 @@ export class Game {
     }
 
     await this.saveRepository.savePlayer(
+      this.session.id,
       this.session.player.getState(),
       this.session.inventory.snapshot(),
       this.session.worldStats,
@@ -1031,6 +1243,7 @@ export class Game {
     this.settings = {
       keyBindings: cloneBindings(settings.keyBindings),
       skinDataUrl: settings.skinDataUrl,
+      startFullscreen: settings.startFullscreen,
     };
     this.menu.setSettings(this.settings);
     this.hud.setHandSkin(this.settings.skinDataUrl);
@@ -1167,5 +1380,108 @@ export class Game {
       });
     }
     return true;
+  }
+
+  private async playMenuMusic(): Promise<void> {
+    if (!this.menuMusic.paused) {
+      return;
+    }
+
+    try {
+      await this.menuMusic.play();
+      this.unregisterMenuMusicUnlock();
+    } catch {
+      this.registerMenuMusicUnlock();
+    }
+  }
+
+  private stopMenuMusic(): void {
+    this.menuMusic.pause();
+    this.menuMusic.currentTime = 0;
+    this.unregisterMenuMusicUnlock();
+  }
+
+  private registerMenuMusicUnlock(): void {
+    if (this.menuMusicUnlockRegistered) {
+      return;
+    }
+
+    this.menuMusicUnlockRegistered = true;
+    window.addEventListener('pointerdown', this.handleMenuMusicUnlock);
+    window.addEventListener('keydown', this.handleMenuMusicUnlock);
+  }
+
+  private unregisterMenuMusicUnlock(): void {
+    if (!this.menuMusicUnlockRegistered) {
+      return;
+    }
+
+    this.menuMusicUnlockRegistered = false;
+    window.removeEventListener('pointerdown', this.handleMenuMusicUnlock);
+    window.removeEventListener('keydown', this.handleMenuMusicUnlock);
+  }
+
+  private handleMenuMusicUnlock(): void {
+    void this.playMenuMusic();
+  }
+
+  private handleEntryGateClick(): void {
+    if (this.entryGateDismissed || this.entryGateActivated) {
+      return;
+    }
+
+    this.entryGateActivated = true;
+    this.entryGateDelayElapsed = false;
+    this.entryGateButton.disabled = true;
+    this.entryGateButton.textContent = this.entryGateReady ? 'Acces...' : 'Chargement...';
+    if (this.settings.startFullscreen) {
+      void this.requestFullscreen();
+    }
+    this.showIntroSplash();
+    if (this.entryGateDelayTimeoutId !== null) {
+      window.clearTimeout(this.entryGateDelayTimeoutId);
+    }
+    this.entryGateDelayTimeoutId = window.setTimeout(() => {
+      this.entryGateDelayElapsed = true;
+      this.entryGateDelayTimeoutId = null;
+      this.finishEntryGate();
+    }, INTRO_SPLASH_BEFORE_MENU_MS);
+    void this.playMenuMusic();
+    this.finishEntryGate();
+  }
+
+  private finishEntryGate(): void {
+    if (!this.entryGateReady || this.entryGateDismissed || !this.entryGateActivated || !this.entryGateDelayElapsed) {
+      return;
+    }
+    this.entryGateDismissed = true;
+    this.entryGate.remove();
+    this.menu.showBoot();
+  }
+
+  private showIntroSplash(): void {
+    this.introSplash.classList.remove('active');
+    void this.introSplash.offsetWidth;
+    this.introSplash.classList.add('active');
+
+    if (this.introSplashTimeoutId !== null) {
+      window.clearTimeout(this.introSplashTimeoutId);
+    }
+    this.introSplashTimeoutId = window.setTimeout(() => {
+      this.introSplash.classList.remove('active');
+      this.introSplashTimeoutId = null;
+    }, INTRO_SPLASH_DURATION_MS);
+  }
+
+  private async requestFullscreen(): Promise<void> {
+    if (document.fullscreenElement) {
+      return;
+    }
+
+    try {
+      await this.shell.requestFullscreen();
+    } catch {
+      // Ignore unsupported or denied fullscreen requests.
+    }
   }
 }

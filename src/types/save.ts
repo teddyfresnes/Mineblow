@@ -13,6 +13,11 @@ export interface ChunkDiffRecord {
   revision: number;
 }
 
+export interface StoredChunkDiffRecord extends ChunkDiffRecord {
+  id: string;
+  worldId: string;
+}
+
 export interface WorldStats {
   blocksMined: number;
   blocksPlaced: number;
@@ -32,14 +37,22 @@ export interface GlobalStats {
   worldsCreated: number;
 }
 
-export interface WorldSave {
-  schemaVersion: 4;
-  worldId: 'default-world';
+export interface WorldSummary {
+  id: string;
+  name: string;
   seed: string;
+  previewImageDataUrl: string | null;
   createdAt: string;
+  updatedAt: string;
+  lastPlayedAt: string;
+  worldStats: WorldStats;
+}
+
+export interface WorldSave extends WorldSummary {
+  schemaVersion: 5;
+  worldId: string;
   player: PlayerState;
   inventory: InventorySlot[];
-  worldStats: WorldStats;
 }
 
 export interface StoredSettings extends GameSettings {
@@ -48,6 +61,12 @@ export interface StoredSettings extends GameSettings {
 
 export interface StoredGlobalStats extends GlobalStats {
   schemaVersion: 1;
+}
+
+export interface StoredAppMeta {
+  schemaVersion: 1;
+  activeWorldId: string | null;
+  lastWorldId: string | null;
 }
 
 export const createEmptyWorldStats = (): WorldStats => ({

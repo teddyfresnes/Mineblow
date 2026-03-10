@@ -26,6 +26,8 @@ export interface InventoryScreenState {
   skinDataUrl: string | null;
 }
 
+type RecipeFilter = 'craftable' | 'all';
+
 export class InventoryScreen {
   private readonly root = document.createElement('div');
   private readonly title = document.createElement('h2');
@@ -37,6 +39,7 @@ export class InventoryScreen {
   private readonly hoverLabel = document.createElement('div');
   private readonly skinInput = document.createElement('input');
   private readonly slotButtons: HTMLButtonElement[] = [];
+  private readonly filterButtons = new Map<RecipeFilter, HTMLButtonElement>();
   private readonly skinViewer: SkinViewer;
   private visible = false;
   private loadedSkinDataUrl: string | null = null;
@@ -44,6 +47,7 @@ export class InventoryScreen {
   private pointerX = 0;
   private pointerY = 0;
   private latestState: InventoryScreenState | null = null;
+  private recipeFilter: RecipeFilter = 'craftable';
 
   constructor(parent: HTMLElement, private readonly handlers: InventoryScreenHandlers) {
     this.root.className = 'inventory-layer';
@@ -56,6 +60,13 @@ export class InventoryScreen {
     const panel = document.createElement('div');
     panel.className = 'inventory-panel';
 
+    const rail = document.createElement('div');
+    rail.className = 'inventory-rail';
+    rail.append(
+      this.createFilterButton('craftable', 'Craftable'),
+      this.createFilterButton('all', 'All'),
+    );
+
     const sidebar = document.createElement('div');
     sidebar.className = 'inventory-sidebar';
 
@@ -63,18 +74,27 @@ export class InventoryScreen {
     this.status.className = 'inventory-status';
     this.recipeList.className = 'recipe-list';
 
-    const center = document.createElement('div');
-    center.className = 'inventory-center';
+    const workspace = document.createElement('div');
+    workspace.className = 'inventory-workspace';
+
+    const inventoryBoard = document.createElement('div');
+    inventoryBoard.className = 'inventory-board';
+
+    const boardHeader = document.createElement('div');
+    boardHeader.className = 'inventory-board-header';
+    const boardTitle = document.createElement('h3');
+    boardTitle.className = 'inventory-section-title';
+    boardTitle.textContent = 'Storage';
+    const boardHint = document.createElement('span');
+    boardHint.textContent = 'Left click swap, right click split, shift click quick-move.';
+    boardHeader.append(boardTitle, boardHint);
 
     const sectionMain = document.createElement('section');
     sectionMain.className = 'inventory-section';
-    const sectionMainTitle = document.createElement('h3');
-    sectionMainTitle.className = 'inventory-section-title';
-    sectionMainTitle.textContent = 'Inventory';
     this.mainGrid.className = 'inventory-grid inventory-grid-main';
 
     const sectionHotbar = document.createElement('section');
-    sectionHotbar.className = 'inventory-section';
+    sectionHotbar.className = 'inventory-section inventory-hotbar-section';
     const sectionHotbarTitle = document.createElement('h3');
     sectionHotbarTitle.className = 'inventory-section-title';
     sectionHotbarTitle.textContent = 'Hotbar';
@@ -113,6 +133,7 @@ export class InventoryScreen {
       const count = document.createElement('div');
       count.className = 'inventory-slot-count';
       button.append(preview, count);
+
       if (index < 27) {
         this.mainGrid.append(button);
       } else {
@@ -120,18 +141,27 @@ export class InventoryScreen {
       }
       this.slotButtons.push(button);
     }
-    sectionMain.append(sectionMainTitle, this.mainGrid);
+
+    sectionMain.append(this.mainGrid);
     sectionHotbar.append(sectionHotbarTitle, this.hotbarGrid);
 
     this.cursorLabel.className = 'inventory-cursor';
     this.hoverLabel.className = 'inventory-hover';
 
+    inventoryBoard.append(boardHeader, sectionMain, sectionHotbar, this.cursorLabel);
+
     const previewPanel = document.createElement('div');
     previewPanel.className = 'inventory-preview';
+
+    const paperdollCard = document.createElement('div');
+    paperdollCard.className = 'inventory-side-card';
+    const paperdollTitle = document.createElement('h3');
+    paperdollTitle.className = 'inventory-section-title';
+    paperdollTitle.textContent = 'Character';
     const paperdoll = document.createElement('div');
     paperdoll.className = 'paperdoll';
     paperdoll.innerHTML = `
-      <div class="paperdoll-scale">3D player model (Minecraft 64x64 skin)</div>
+      <div class="paperdoll-scale">3D player preview</div>
       <div class="paperdoll-stage"></div>
     `;
     const paperdollStage = paperdoll.querySelector<HTMLElement>('.paperdoll-stage');
@@ -162,6 +192,25 @@ export class InventoryScreen {
       this.skinInput.value = '';
     });
     skinLoader.append(this.skinInput);
+    paperdollCard.append(paperdollTitle, paperdoll, skinLoader);
+
+    const equipmentCard = document.createElement('div');
+    equipmentCard.className = 'inventory-side-card';
+    const equipmentTitle = document.createElement('h3');
+    equipmentTitle.className = 'inventory-section-title';
+    equipmentTitle.textContent = 'Equipment';
+    const equipmentNote = document.createElement('p');
+    equipmentNote.className = 'inventory-side-note';
+    equipmentNote.textContent = 'Reserved vertical slots for future armor/equipment.';
+    const equipmentSlots = document.createElement('div');
+    equipmentSlots.className = 'equipment-slot-column';
+    for (let index = 0; index < 4; index += 1) {
+      const slot = document.createElement('div');
+      slot.className = 'equipment-slot';
+      slot.textContent = 'Soon';
+      equipmentSlots.append(slot);
+    }
+    equipmentCard.append(equipmentTitle, equipmentNote, equipmentSlots);
 
     const closeButton = document.createElement('button');
     closeButton.type = 'button';
@@ -170,9 +219,9 @@ export class InventoryScreen {
     closeButton.addEventListener('click', () => this.handlers.onClose());
 
     sidebar.append(this.title, this.status, this.recipeList);
-    center.append(sectionMain, sectionHotbar, this.cursorLabel, this.hoverLabel, closeButton);
-    previewPanel.append(paperdoll, skinLoader);
-    panel.append(sidebar, center, previewPanel);
+    workspace.append(inventoryBoard, closeButton);
+    previewPanel.append(paperdollCard, equipmentCard);
+    panel.append(rail, sidebar, workspace, previewPanel, this.hoverLabel);
     this.root.append(panel);
     parent.append(this.root);
     this.setVisible(false);
@@ -199,10 +248,20 @@ export class InventoryScreen {
     this.latestState = state;
     this.title.textContent =
       state.mode === 'crafting_table' ? 'Crafting Table' : 'Inventory';
+
+    const visibleRecipes =
+      this.recipeFilter === 'craftable'
+        ? state.recipes.filter((recipe) => state.craftableRecipeIds.has(recipe.id))
+        : state.recipes;
+    const craftableCount = state.recipes.filter((recipe) => state.craftableRecipeIds.has(recipe.id)).length;
     this.status.textContent =
       state.mode === 'crafting_table'
-        ? 'Left click pick/swap. Right click split/place one. Shift-click quick transfer.'
-        : 'Left click pick/swap. Right click split/place one. Shift-click quick transfer.';
+        ? `${craftableCount} recipe(s) available on the table.`
+        : `${craftableCount} recipe(s) available from the player inventory.`;
+
+    this.filterButtons.forEach((button, filter) => {
+      button.classList.toggle('active', filter === this.recipeFilter);
+    });
 
     if (this.loadedSkinDataUrl !== state.skinDataUrl) {
       this.loadedSkinDataUrl = state.skinDataUrl;
@@ -210,24 +269,48 @@ export class InventoryScreen {
     }
 
     this.recipeList.replaceChildren();
-    state.recipes.forEach((recipe) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'recipe-card';
-      button.disabled = !state.craftableRecipeIds.has(recipe.id);
-      button.addEventListener('click', () => this.handlers.onRecipeCraft(recipe.id));
+    if (visibleRecipes.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'recipe-empty';
+      empty.textContent =
+        this.recipeFilter === 'craftable'
+          ? 'Nothing craftable right now.'
+          : 'No recipes available in this mode.';
+      this.recipeList.append(empty);
+    } else {
+      visibleRecipes.forEach((recipe) => {
+        const craftable = state.craftableRecipeIds.has(recipe.id);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'recipe-card';
+        button.disabled = !craftable;
+        button.addEventListener('click', () => this.handlers.onRecipeCraft(recipe.id));
 
-      const ingredientText = recipe.ingredients
-        .map((ingredient) => `${ingredient.count} x ${getBlockLabel(ingredient.blockId)}`)
-        .join(' + ');
+        const icon = document.createElement('div');
+        icon.className = 'recipe-icon';
+        icon.style.background = getUiBlockColor(recipe.output.blockId);
 
-      button.innerHTML = `
-        <strong>${recipe.label}</strong>
-        <span>${recipe.description}</span>
-        <em>${ingredientText}</em>
-      `;
-      this.recipeList.append(button);
-    });
+        const body = document.createElement('div');
+        body.className = 'recipe-card-body';
+        const label = document.createElement('strong');
+        label.textContent = recipe.label;
+        const description = document.createElement('span');
+        description.textContent = recipe.description;
+
+        const ingredients = document.createElement('div');
+        ingredients.className = 'recipe-ingredients';
+        recipe.ingredients.forEach((ingredient) => {
+          const chip = document.createElement('div');
+          chip.className = 'recipe-chip';
+          chip.innerHTML = `<b style="background:${getUiBlockColor(ingredient.blockId)}"></b>${ingredient.count} x ${getBlockLabel(ingredient.blockId)}`;
+          ingredients.append(chip);
+        });
+
+        body.append(label, description, ingredients);
+        button.append(icon, body);
+        this.recipeList.append(button);
+      });
+    }
 
     state.slots.forEach((slot, index) => {
       const button = this.slotButtons[index];
@@ -236,7 +319,9 @@ export class InventoryScreen {
       const hotbarIndex = index - 27;
 
       button.classList.toggle('selected', hotbarIndex === state.selectedHotbarIndex && hotbarIndex >= 0);
+      button.classList.toggle('filled', slot.blockId !== null && slot.count > 0);
       preview.style.background = getUiBlockColor(slot.blockId);
+      preview.textContent = slot.blockId === null ? '' : getBlockLabel(slot.blockId).slice(0, 1).toUpperCase();
       count.textContent = slot.count > 0 ? String(slot.count) : '';
       count.style.display = slot.count > 0 ? '' : 'none';
     });
@@ -247,6 +332,21 @@ export class InventoryScreen {
       this.cursorLabel.textContent = `Cursor: ${state.cursor.count} x ${getBlockLabel(state.cursor.blockId)}`;
     }
     this.renderHoverLabel();
+  }
+
+  private createFilterButton(filter: RecipeFilter, label: string): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'inventory-filter-button';
+    button.textContent = label;
+    button.addEventListener('click', () => {
+      this.recipeFilter = filter;
+      if (this.latestState) {
+        this.render(this.latestState);
+      }
+    });
+    this.filterButtons.set(filter, button);
+    return button;
   }
 
   private renderHoverLabel(): void {

@@ -23,6 +23,7 @@ export type KeyBindings = Record<ControlAction, KeyBinding>;
 export interface GameSettings {
   keyBindings: KeyBindings;
   skinDataUrl: string | null;
+  startFullscreen: boolean;
 }
 
 export const CONTROL_LABELS: Record<ControlAction, string> = {
@@ -54,6 +55,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
 export const createDefaultSettings = (): GameSettings => ({
   keyBindings: structuredClone(DEFAULT_KEY_BINDINGS),
   skinDataUrl: null,
+  startFullscreen: true,
 });
 
 export const cloneBindings = (bindings: KeyBindings): KeyBindings => {

@@ -12,7 +12,7 @@ import { createPlayerModel, disposeModel, loadSkinTexture } from '../render/Skin
 
 export class SkinViewer {
   private readonly scene = new Scene();
-  private readonly camera = new PerspectiveCamera(38, 1, 0.1, 20);
+  private readonly camera = new PerspectiveCamera(42, 1, 0.1, 20);
   private readonly renderer: WebGLRenderer;
   private readonly clock = new Clock();
   private readonly resizeObserver: ResizeObserver;
@@ -32,7 +32,7 @@ export class SkinViewer {
     this.renderer.domElement.className = 'paperdoll-canvas';
     this.container.append(this.renderer.domElement);
 
-    this.camera.position.set(0, 1.6, 3.1);
+    this.camera.position.set(0, 1.02, 3.9);
     this.scene.add(new AmbientLight('#dbe9ff', 0.6));
     const key = new DirectionalLight('#ffe9bd', 1.1);
     key.position.set(3.2, 4, 2.4);
