@@ -2047,12 +2047,12 @@
 }
 
 .singleplayer-view {
-  padding-top: 10px;
+  padding-top: clamp(14px, 2.2vh, 24px);
   padding-bottom: 8px;
 }
 
 .singleplayer-view .classic-screen-header {
-  margin-top: 6px;
+  margin-top: clamp(14px, 2.2vh, 24px);
 }
 
 .singleplayer-view .classic-footer-stack {
@@ -2290,7 +2290,7 @@
 
 .menu-panel[data-screen='home'] .home-left-column {
   position: fixed !important;
-  top: clamp(20px, 3.2vh, 38px) !important;
+  top: clamp(32px, 4.8vh, 60px) !important;
   left: 50vw !important;
   transform: translateX(calc(-50% + var(--home-center-nudge, 0px))) !important;
   width: 520px !important;
@@ -2310,6 +2310,14 @@
 
 .menu-panel[data-screen='home'] .title-actions .menu-button {
   width: 100% !important;
+}
+
+.menu-panel[data-screen='singleplayer'] .singleplayer-view {
+  padding-top: clamp(16px, 2.6vh, 28px) !important;
+}
+
+.menu-panel[data-screen='singleplayer'] .singleplayer-view .classic-screen-header {
+  margin-top: clamp(16px, 2.6vh, 28px) !important;
 }
 
 .menu-panel[data-screen='home'] .home-right-column {
