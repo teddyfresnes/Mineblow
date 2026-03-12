@@ -1,6 +1,11 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { SAVE_CONFIG } from '../game/Config';
-import { createDefaultSettings, type GameSettings } from '../game/Controls';
+import {
+  DEFAULT_INTERFACE_SIZE,
+  createDefaultSettings,
+  normalizeInterfaceSize,
+  type GameSettings,
+} from '../game/Controls';
 import type { InventorySlot, PlayerState } from '../types/player';
 import {
   createEmptyGlobalStats,
@@ -402,6 +407,7 @@ export class SaveRepository {
         keyBindings: settings.keyBindings,
         skinDataUrl: settings.skinDataUrl,
         startFullscreen: settings.startFullscreen ?? true,
+        interfaceSize: normalizeInterfaceSize(settings.interfaceSize ?? DEFAULT_INTERFACE_SIZE),
       };
     }
 

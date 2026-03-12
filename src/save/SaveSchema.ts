@@ -1,4 +1,4 @@
-import { CONTROL_ACTIONS } from '../game/Controls';
+import { CONTROL_ACTIONS, MAX_INTERFACE_SIZE, MIN_INTERFACE_SIZE } from '../game/Controls';
 import type {
   ChunkDiffRecord,
   StoredAppMeta,
@@ -49,6 +49,12 @@ const isStringOrNull = (value: unknown): value is string | null =>
 
 const isIsoString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
+
+const isInterfaceSize = (value: unknown): value is number =>
+  isFiniteNumber(value) &&
+  Number.isInteger(value) &&
+  value >= MIN_INTERFACE_SIZE &&
+  value <= MAX_INTERFACE_SIZE;
 
 const isWorldStats = (value: unknown): boolean => {
   if (!value || typeof value !== "object") {
@@ -190,7 +196,8 @@ export const isStoredSettings = (value: unknown): value is StoredSettings => {
   return (
     hasAllBindings &&
     isStringOrNull(candidate.skinDataUrl) &&
-    (typeof candidate.startFullscreen === 'boolean' || typeof candidate.startFullscreen === 'undefined')
+    (typeof candidate.startFullscreen === 'boolean' || typeof candidate.startFullscreen === 'undefined') &&
+    (typeof candidate.interfaceSize === 'undefined' || isInterfaceSize(candidate.interfaceSize))
   );
 };
 

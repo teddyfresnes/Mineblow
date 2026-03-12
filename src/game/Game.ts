@@ -2,6 +2,8 @@ import { PLAYER_CONFIG, SAVE_CONFIG, WORLD_CONFIG } from './Config';
 import {
   cloneBindings,
   createDefaultSettings,
+  getInterfaceZoomPercent,
+  normalizeInterfaceSize,
   type GameSettings,
 } from './Controls';
 import { GameLoop } from './GameLoop';
@@ -129,6 +131,7 @@ export class Game {
   constructor(private readonly root: HTMLElement) {
     this.shell.className = 'mineblow-shell';
     this.canvas.className = 'mineblow-canvas';
+    this.canvas.style.visibility = 'hidden';
     this.entryGate.className = 'entry-gate';
     this.entryGateButton.type = 'button';
     this.entryGateButton.className = 'entry-gate-button';
@@ -151,6 +154,7 @@ export class Game {
     this.entryGateButton.addEventListener('click', this.handleEntryGateClick);
 
     this.renderer = new Renderer(this.canvas);
+    this.renderer.setFirstPersonHandVisible(false);
     this.input = new InputController(this.canvas);
     this.hud = new Hud(this.shell);
     this.debugOverlay = new DebugOverlay(this.shell);
@@ -169,6 +173,7 @@ export class Game {
           keyBindings: cloneBindings(this.settings.keyBindings),
           skinDataUrl,
           startFullscreen: this.settings.startFullscreen,
+          interfaceSize: this.settings.interfaceSize,
         });
       },
     });
@@ -206,6 +211,7 @@ export class Game {
     this.input.connect();
     this.input.setPointerLockListener(this.handlePointerLockChange);
     this.hud.setVisible(false);
+    this.updateCanvasVisibility();
     this.handleResize();
     window.addEventListener('resize', this.handleResize);
     window.addEventListener('beforeunload', this.handleBeforeUnload);
@@ -217,6 +223,7 @@ export class Game {
     ]);
 
     this.settings = settings;
+    this.applyInterfaceZoom(this.settings.interfaceSize);
     this.globalStats = globalStats;
     this.menu.setSettings(settings);
     this.menu.setGlobalStats(globalStats);
@@ -287,11 +294,13 @@ export class Game {
     this.droppedItems.clear();
     this.renderer.clearChunks();
     this.renderer.clearDroppedItems();
+    this.renderer.setFirstPersonHandVisible(false);
     this.renderer.setMiningOverlay(null, 0);
     this.hud.setMiningProgress(0);
     this.hud.setVisible(false);
     this.menu.setGlobalStats(this.globalStats);
     this.menu.setPauseWorld(null);
+    this.updateCanvasVisibility();
     await this.refreshMenuWorlds();
     this.menu.showBoot();
     void this.playMenuMusic();
@@ -369,6 +378,7 @@ export class Game {
 
   private async activateSession(session: Session): Promise<void> {
     this.session = session;
+    this.updateCanvasVisibility();
     this.stopMenuMusic();
     this.savePlayerElapsedMs = 0;
     this.statsPanelRefreshElapsedMs = 0;
@@ -615,6 +625,11 @@ export class Game {
   }
 
   private render(): void {
+    if (!this.session) {
+      this.lastRenderTime = performance.now();
+      return;
+    }
+
     if (this.session) {
       const cameraPosition = this.session.player.getCameraPosition();
       const rotation = this.session.player.getRotation();
@@ -633,6 +648,10 @@ export class Game {
 
     this.renderer.render();
     this.capturePendingWorldPreview();
+  }
+
+  private updateCanvasVisibility(): void {
+    this.canvas.style.visibility = this.session ? 'visible' : 'hidden';
   }
 
   private queueWorldPreviewCapture(worldId: string): void {
@@ -1244,7 +1263,9 @@ export class Game {
       keyBindings: cloneBindings(settings.keyBindings),
       skinDataUrl: settings.skinDataUrl,
       startFullscreen: settings.startFullscreen,
+      interfaceSize: normalizeInterfaceSize(settings.interfaceSize),
     };
+    this.applyInterfaceZoom(this.settings.interfaceSize);
     this.menu.setSettings(this.settings);
     this.hud.setHandSkin(this.settings.skinDataUrl);
     this.renderer.setPlayerSkin(this.settings.skinDataUrl);
@@ -1252,6 +1273,11 @@ export class Game {
     if (this.inventoryScreen.isVisible()) {
       this.refreshInventoryScreen();
     }
+  }
+
+  private applyInterfaceZoom(interfaceSize: number): void {
+    const zoomPercent = getInterfaceZoomPercent(interfaceSize);
+    this.root.style.setProperty('zoom', `${zoomPercent}%`);
   }
 
   private normalizeWorldStats(stats: WorldStats | undefined): WorldStats {

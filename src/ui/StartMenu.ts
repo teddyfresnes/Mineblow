@@ -3,6 +3,8 @@ import {
   CONTROL_LABELS,
   cloneBindings,
   createDefaultSettings,
+  getInterfaceZoomPercent,
+  getNextInterfaceSize,
   formatKeyCode,
   type ControlAction,
   type GameSettings,
@@ -14,7 +16,17 @@ import {
   type WorldStats,
   type WorldSummary,
 } from '../types/save';
-import { getCatalogSkins, getSkinCategories, type CatalogSkin, type SkinCategory } from './SkinCatalog';
+import {
+  clearCatalogSkinLookupCache,
+  findCatalogSkinByUrl,
+  findCatalogSkinNameByUrl,
+  getCatalogSkins,
+  getSkinCategories,
+  loadCatalogSkinUrl,
+  type CatalogCategory,
+  type CatalogSkin,
+  type SkinCategory,
+} from './SkinCatalog';
 import { MenuPanorama } from './MenuPanorama';
 import { SkinViewer } from './SkinViewer';
 import { createBitmapText } from './BitmapText';
@@ -45,6 +57,7 @@ type MenuScreen =
 type BindingSlot = 'primary' | 'secondary';
 type StatsCategory = 'general' | 'items';
 type MenuSurface = 'panorama' | 'classic' | 'transparent';
+type WardrobeGenderFilter = 'all' | 'male' | 'female';
 
 interface PauseWorldSnapshot {
   id: string;
@@ -101,12 +114,21 @@ export class StartMenu {
   private readonly deleteWorldButton = document.createElement('button');
   private readonly saveEditWorldButton = document.createElement('button');
   private readonly startupFullscreenToggleButton = document.createElement('button');
+  private readonly interfaceSizeToggleButton = document.createElement('button');
   private readonly statsList = document.createElement('div');
+  private readonly wardrobeCategorySelect = document.createElement('select');
   private readonly wardrobeCategoryList = document.createElement('div');
+  private readonly wardrobeGalleryHeader = document.createElement('div');
+  private readonly wardrobeCategoryTitle = document.createElement('div');
+  private readonly wardrobeHeaderRight = document.createElement('div');
+  private readonly wardrobeFilterBar = document.createElement('div');
+  private readonly wardrobeFilterButtons = new Map<WardrobeGenderFilter, HTMLButtonElement>();
+  private readonly wardrobeLoadingIndicator = document.createElement('span');
   private readonly wardrobeGallery = document.createElement('div');
   private readonly wardrobeImportInput = document.createElement('input');
   private readonly wardrobeEmptyLabel = document.createElement('div');
   private readonly wardrobeSkinName = document.createElement('div');
+  private readonly wardrobeValidateButton = document.createElement('button');
   private readonly pauseTitle = document.createElement('h2');
   private readonly pauseMeta = document.createElement('div');
   private readonly pauseStats = document.createElement('dl');
@@ -121,9 +143,30 @@ export class StartMenu {
   private listeningBinding: { action: ControlAction; slot: BindingSlot } | null = null;
   private pauseWorld: PauseWorldSnapshot | null = null;
   private selectedWardrobeCategory: SkinCategory = '';
+  private wardrobeGenderFilter: WardrobeGenderFilter = 'all';
+  private wardrobeRenderRequestId = 0;
+  private wardrobeCategoryRenderRequestId = 0;
+  private wardrobeCategoriesRenderKey = '';
+  private wardrobeCategoryScrollTop = 0;
+  private readonly wardrobeCategoriesByName = new Map<SkinCategory, CatalogCategory>();
+  private readonly wardrobeGalleryScrollByKey = new Map<string, number>();
+  private currentWardrobeGalleryKey: string | null = null;
   private selectedSkinUrl: string | null = null;
+  private importedSkinName: string | null = null;
+  private selectedSkinName: string | null = null;
+  private wardrobePendingSkinUrl: string | null = null;
+  private wardrobePendingImportedSkinName: string | null = null;
+  private wardrobePendingSkinName: string | null = null;
+  private readonly wardrobeCategoryViewers: SkinViewer[] = [];
+  private readonly wardrobeCardViewers = new Map<HTMLElement, SkinViewer>();
+  private wardrobeCardObserver: IntersectionObserver | null = null;
+  private wardrobeGalleryLoadObserver: IntersectionObserver | null = null;
+  private wardrobeGallerySentinel: HTMLDivElement | null = null;
+  private wardrobeGalleryPendingSkins: CatalogSkin[] = [];
+  private wardrobeGalleryNextIndex = 0;
+  private wardrobeGalleryLoading = false;
+  private readonly wardrobeGalleryChunkSize = 6;
   private selectedStatsCategory: StatsCategory = 'general';
-  private wardrobeCategoryViewers: SkinViewer[] = [];
   private homeLeftColumn: HTMLDivElement | null = null;
   private homeActionsColumn: HTMLDivElement | null = null;
   private readonly handleHomeAlignmentResize = (): void => {
@@ -187,13 +230,19 @@ export class StartMenu {
       if (!file) {
         return;
       }
+      const importedSkinName = file.name.replace(/\.[^.]+$/, '');
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === 'string') {
-          this.selectedSkinUrl = reader.result;
-          this.commitSkinSelection(reader.result);
-          this.renderWardrobe();
-          this.updateViewerSkins();
+          this.wardrobePendingImportedSkinName = importedSkinName;
+          this.wardrobePendingSkinName = importedSkinName;
+          this.wardrobePendingSkinUrl = reader.result;
+          if (this.currentScreen === 'wardrobe') {
+            this.highlightSelectedWardrobeCard();
+            this.renderWardrobeSkinName(this.resolvePendingWardrobeSkinName());
+            void this.wardrobeSkinViewer.setSkin(this.wardrobePendingSkinUrl);
+            this.updateWardrobeValidateButton();
+          }
         }
       };
       reader.readAsDataURL(file);
@@ -204,11 +253,11 @@ export class StartMenu {
 
     this.renderBindings();
     this.syncSkinSelectionFromSettings();
+    this.resetWardrobePendingSelection();
     this.renderWorldSelection();
     this.renderEditWorldScreen();
     this.renderStatsView();
     this.renderGraphicsView();
-    this.renderWardrobe();
     this.renderPauseView();
     this.updateViewerSkins();
     this.showScreen('home');
@@ -217,15 +266,36 @@ export class StartMenu {
   }
 
   setSettings(settings: GameSettings): void {
+    const previousSkinDataUrl = this.settings.skinDataUrl;
+    const previousSelectedCategory = this.selectedWardrobeCategory;
     this.settings = {
       keyBindings: cloneBindings(settings.keyBindings),
       skinDataUrl: settings.skinDataUrl,
       startFullscreen: settings.startFullscreen,
+      interfaceSize: settings.interfaceSize,
     };
     this.renderBindings();
     this.syncSkinSelectionFromSettings();
+    const skinChanged = this.settings.skinDataUrl !== previousSkinDataUrl;
+    if (skinChanged) {
+      this.resetWardrobePendingSelection();
+    }
     this.renderGraphicsView();
-    this.renderWardrobe();
+    if (this.currentScreen === 'wardrobe') {
+      if (this.wardrobeCategoriesByName.size === 0) {
+        this.renderWardrobe();
+      } else if (this.selectedWardrobeCategory !== previousSelectedCategory) {
+        const selectedCategory = this.wardrobeCategoriesByName.get(this.selectedWardrobeCategory) ?? null;
+        this.updateWardrobeCategoryButtons();
+        this.renderWardrobeFilterBar(selectedCategory, this.wardrobeCategoriesByName.size);
+        void this.renderWardrobeGallery(selectedCategory, this.wardrobeCategoriesByName.size);
+      } else if (skinChanged) {
+        this.highlightSelectedWardrobeCard();
+        this.renderWardrobeSkinName(this.resolvePendingWardrobeSkinName());
+        void this.wardrobeSkinViewer.setSkin(this.wardrobePendingSkinUrl);
+      }
+      this.updateWardrobeValidateButton();
+    }
     this.updateViewerSkins();
   }
 
@@ -343,7 +413,7 @@ export class StartMenu {
     right.className = 'home-right-column home-avatar-column';
     const viewerStage = document.createElement('div');
     viewerStage.className = 'menu-player-stage bare-player-stage home-avatar-stage';
-    this.homeSkinViewer = new SkinViewer(viewerStage);
+    this.homeSkinViewer = new SkinViewer(viewerStage, null, { animationMode: 'idle' });
 
     const wardrobeButton = document.createElement('button');
     wardrobeButton.type = 'button';
@@ -603,21 +673,42 @@ export class StartMenu {
     stack.className = 'classic-button-stack graphics-options-stack';
 
     this.startupFullscreenToggleButton.type = 'button';
-    this.startupFullscreenToggleButton.className = 'menu-button graphics-toggle-button';
+    this.startupFullscreenToggleButton.className = 'menu-button settings-compact-button';
     this.startupFullscreenToggleButton.addEventListener('click', () => {
       this.settings = {
         keyBindings: cloneBindings(this.settings.keyBindings),
         skinDataUrl: this.settings.skinDataUrl,
         startFullscreen: !this.settings.startFullscreen,
+        interfaceSize: this.settings.interfaceSize,
       };
       this.renderGraphicsView();
       this.handlers.onSettingsChange({
         keyBindings: cloneBindings(this.settings.keyBindings),
         skinDataUrl: this.settings.skinDataUrl,
         startFullscreen: this.settings.startFullscreen,
+        interfaceSize: this.settings.interfaceSize,
       });
     });
-    stack.append(this.startupFullscreenToggleButton);
+
+    this.interfaceSizeToggleButton.type = 'button';
+    this.interfaceSizeToggleButton.className = 'menu-button settings-compact-button';
+    this.interfaceSizeToggleButton.addEventListener('click', () => {
+      this.settings = {
+        keyBindings: cloneBindings(this.settings.keyBindings),
+        skinDataUrl: this.settings.skinDataUrl,
+        startFullscreen: this.settings.startFullscreen,
+        interfaceSize: getNextInterfaceSize(this.settings.interfaceSize),
+      };
+      this.renderGraphicsView();
+      this.handlers.onSettingsChange({
+        keyBindings: cloneBindings(this.settings.keyBindings),
+        skinDataUrl: this.settings.skinDataUrl,
+        startFullscreen: this.settings.startFullscreen,
+        interfaceSize: this.settings.interfaceSize,
+      });
+    });
+
+    stack.append(this.startupFullscreenToggleButton, this.interfaceSizeToggleButton);
 
     frame.append(stack);
 
@@ -687,12 +778,14 @@ export class StartMenu {
         keyBindings: cloneBindings(defaults.keyBindings),
         skinDataUrl: this.settings.skinDataUrl,
         startFullscreen: this.settings.startFullscreen,
+        interfaceSize: this.settings.interfaceSize,
       };
       this.renderBindings();
       this.handlers.onSettingsChange({
         keyBindings: cloneBindings(this.settings.keyBindings),
         skinDataUrl: this.settings.skinDataUrl,
         startFullscreen: this.settings.startFullscreen,
+        interfaceSize: this.settings.interfaceSize,
       });
     });
 
@@ -792,22 +885,61 @@ export class StartMenu {
 
     const categoryRail = document.createElement('div');
     categoryRail.className = 'wardrobe-category-rail';
+    this.wardrobeCategorySelect.className = 'wardrobe-category-select';
+    this.wardrobeCategorySelect.addEventListener('change', () => {
+      const categoryName = this.wardrobeCategorySelect.value as SkinCategory;
+      if (!categoryName) {
+        return;
+      }
+      this.selectWardrobeCategory(categoryName);
+    });
     this.wardrobeCategoryList.className = 'wardrobe-category-list';
-    categoryRail.append(this.wardrobeCategoryList);
+    this.wardrobeCategoryList.addEventListener('scroll', () => {
+      this.wardrobeCategoryScrollTop = this.wardrobeCategoryList.scrollTop;
+    });
+    categoryRail.append(this.wardrobeCategorySelect, this.wardrobeCategoryList);
 
     const galleryWell = document.createElement('div');
     galleryWell.className = 'menu-well';
+    this.wardrobeGalleryHeader.className = 'wardrobe-gallery-header';
+    this.wardrobeCategoryTitle.className = 'wardrobe-category-title';
+    this.wardrobeHeaderRight.className = 'wardrobe-gallery-header-right';
+    this.wardrobeFilterBar.className = 'wardrobe-filter-bar';
+    this.wardrobeLoadingIndicator.className = 'wardrobe-loading-indicator';
+    this.wardrobeLoadingIndicator.setAttribute('aria-hidden', 'true');
+    this.wardrobeHeaderRight.append(this.wardrobeLoadingIndicator, this.wardrobeFilterBar);
+    this.wardrobeGalleryHeader.append(this.wardrobeCategoryTitle, this.wardrobeHeaderRight);
     this.wardrobeGallery.className = 'wardrobe-gallery';
+    this.wardrobeGallery.addEventListener('scroll', () => {
+      if (!this.currentWardrobeGalleryKey) {
+        return;
+      }
+      const scrollTop = this.wardrobeGallery.scrollTop;
+      this.wardrobeGalleryScrollByKey.set(this.currentWardrobeGalleryKey, scrollTop);
+
+      if (this.currentScreen !== 'wardrobe' || this.wardrobeGalleryPendingSkins.length === 0) {
+        return;
+      }
+      const remaining =
+        this.wardrobeGallery.scrollHeight - (scrollTop + this.wardrobeGallery.clientHeight);
+      if (remaining <= 220) {
+        void this.loadNextWardrobeGalleryChunk(this.wardrobeRenderRequestId);
+      }
+    });
     this.wardrobeEmptyLabel.className = 'empty-worlds';
-    galleryWell.append(this.wardrobeGallery, this.wardrobeEmptyLabel);
+    galleryWell.append(this.wardrobeGalleryHeader, this.wardrobeGallery, this.wardrobeEmptyLabel);
 
     const previewWell = document.createElement('div');
     previewWell.className = 'wardrobe-preview-column';
     const stage = document.createElement('div');
     stage.className = 'menu-player-stage bare-player-stage wardrobe-stage';
-    this.wardrobeSkinViewer = new SkinViewer(stage);
+    this.wardrobeSkinViewer = new SkinViewer(stage, null, { animationMode: 'showcase' });
     this.wardrobeSkinName.className = 'wardrobe-skin-name';
-    previewWell.append(stage, this.wardrobeSkinName);
+    this.wardrobeValidateButton.type = 'button';
+    this.wardrobeValidateButton.className = 'menu-button wardrobe-validate-button';
+    this.wardrobeValidateButton.textContent = 'Valider';
+    this.wardrobeValidateButton.addEventListener('click', () => this.applyWardrobePendingSelection());
+    previewWell.append(stage, this.wardrobeSkinName, this.wardrobeValidateButton);
     layout.append(categoryRail, galleryWell, previewWell);
 
     const footer = document.createElement('div');
@@ -816,7 +948,10 @@ export class StartMenu {
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
     backButton.textContent = 'Back';
-    backButton.addEventListener('click', () => this.showScreen('home'));
+    backButton.addEventListener('click', () => {
+      this.discardWardrobePendingSelection();
+      this.showScreen('home');
+    });
     footer.append(backButton);
 
     view.append(layout, footer);
@@ -855,6 +990,7 @@ export class StartMenu {
   }
 
   private showScreen(screen: MenuScreen): void {
+    const previousScreen = this.currentScreen;
     this.currentScreen = screen;
     this.panel.dataset.mode = this.mode;
     this.panel.dataset.screen = screen;
@@ -869,7 +1005,12 @@ export class StartMenu {
     this.renderGraphicsView();
     this.renderPauseView();
     this.renderStatsView();
-    this.renderWardrobe();
+    if (screen === 'wardrobe') {
+      this.renderWardrobe();
+    } else if (previousScreen === 'wardrobe') {
+      this.discardWardrobePendingSelection();
+      this.cleanupWardrobeView();
+    }
     if (screen === 'home') {
       this.alignHomeToViewportCenter();
     }
@@ -1023,37 +1164,85 @@ export class StartMenu {
   }
 
   private renderGraphicsView(): void {
-    this.startupFullscreenToggleButton.textContent = `Activer le plein ecran au demarrage du jeu : ${
+    this.startupFullscreenToggleButton.textContent = `Plein ecran : ${
       this.settings.startFullscreen ? 'ON' : 'OFF'
     }`;
+    const zoom = getInterfaceZoomPercent(this.settings.interfaceSize);
+    this.interfaceSizeToggleButton.textContent = `Taille interface : ${this.settings.interfaceSize} (${zoom}%)`;
   }
 
   private renderWardrobe(): void {
-    this.disposeWardrobeCategoryViewers();
-    this.wardrobeCategoryButtons.clear();
-    this.wardrobeCategoryList.replaceChildren();
-
+    this.resetWardrobePendingSelection();
     const categories = getSkinCategories();
-    if (categories.length > 0 && !categories.some((category) => category.name === this.selectedWardrobeCategory)) {
+    this.syncWardrobeCategories(categories);
+
+    if (categories.length > 0 && !this.wardrobeCategoriesByName.has(this.selectedWardrobeCategory)) {
       this.selectedWardrobeCategory = categories[0].name;
     }
+    const selectedCategory = this.wardrobeCategoriesByName.get(this.selectedWardrobeCategory) ?? null;
+
+    this.updateWardrobeCategoryButtons();
+    this.renderWardrobeFilterBar(selectedCategory, categories.length);
+
+    this.wardrobeEmptyLabel.style.display = 'none';
+    this.wardrobeEmptyLabel.textContent = '';
+    void this.renderWardrobeGallery(selectedCategory, categories.length);
+    this.renderWardrobeSkinName(this.resolvePendingWardrobeSkinName());
+    void this.wardrobeSkinViewer.setSkin(this.wardrobePendingSkinUrl);
+    this.updateWardrobeValidateButton();
+  }
+
+  private syncWardrobeCategories(categories: CatalogCategory[]): void {
+    this.wardrobeCategoriesByName.clear();
+    categories.forEach((category) => {
+      this.wardrobeCategoriesByName.set(category.name, category);
+    });
+
+    const renderKey = categories
+      .map((category) => `${category.name}:${category.skins.length}:${category.supportsGenderFilter ? 1 : 0}`)
+      .join('|');
+    if (renderKey === this.wardrobeCategoriesRenderKey && this.wardrobeCategoryButtons.size > 0) {
+      return;
+    }
+
+    this.wardrobeCategoriesRenderKey = renderKey;
+    this.renderWardrobeCategoryRail(categories);
+  }
+
+  private renderWardrobeCategoryRail(categories: CatalogCategory[]): void {
+    const categoryRenderRequestId = ++this.wardrobeCategoryRenderRequestId;
+    const previousScrollTop = this.wardrobeCategoryScrollTop;
+
+    this.disposeWardrobeCategoryPreviews();
+    this.wardrobeCategoryButtons.clear();
+    this.wardrobeCategoryList.replaceChildren();
+    this.renderWardrobeCategorySelect(categories);
 
     categories.forEach((category) => {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'wardrobe-category-tile';
       button.classList.toggle('active', category.name === this.selectedWardrobeCategory);
-      button.addEventListener('click', () => {
-        this.selectedWardrobeCategory = category.name;
-        this.renderWardrobe();
-      });
+      button.addEventListener('click', () => this.selectWardrobeCategory(category.name));
 
       const stage = document.createElement('div');
       stage.className = 'wardrobe-category-stage';
-      if (category.previewSkinUrl) {
-        const viewer = new SkinViewer(stage);
+      const previewSkin = category.skins[0] ?? null;
+      if (previewSkin) {
+        const viewer = new SkinViewer(stage, null, { animated: false });
         this.wardrobeCategoryViewers.push(viewer);
-        void viewer.setSkin(category.previewSkinUrl);
+        void loadCatalogSkinUrl(previewSkin).then((url) => {
+          if (!url) {
+            return;
+          }
+          if (
+            categoryRenderRequestId !== this.wardrobeCategoryRenderRequestId ||
+            this.currentScreen !== 'wardrobe'
+          ) {
+            return;
+          }
+          void viewer.setSkin(url);
+        });
       } else {
         stage.classList.add('empty');
       }
@@ -1075,64 +1264,508 @@ export class StartMenu {
     importTile.append(importIcon, importLabel, this.wardrobeImportInput);
     this.wardrobeCategoryList.append(importTile);
 
-    const skins = getCatalogSkins(this.selectedWardrobeCategory);
-    this.wardrobeGallery.replaceChildren();
-    skins.forEach((skin) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'wardrobe-skin-card';
-      button.classList.toggle('selected', skin.url === this.selectedSkinUrl);
-      button.addEventListener('click', () => this.selectCatalogSkin(skin));
-
-      const label = document.createElement('span');
-      label.textContent = skin.name;
-      button.append(label);
-      this.wardrobeGallery.append(button);
+    requestAnimationFrame(() => {
+      this.wardrobeCategoryList.scrollTop = previousScrollTop;
     });
-
-    this.wardrobeEmptyLabel.style.display = skins.length === 0 ? '' : 'none';
-    this.wardrobeEmptyLabel.textContent =
-      categories.length === 0
-        ? 'Aucune categorie.'
-        : 'Aucun skin.';
-
-    const allCatalogSkins = categories.flatMap((category) => category.skins);
-    const selectedName =
-      allCatalogSkins.find((skin) => skin.url === this.settings.skinDataUrl)?.name ??
-      (this.settings.skinDataUrl ? 'Imported Skin' : 'Default Skin');
-    this.renderWardrobeSkinName(selectedName);
   }
 
-  private selectCatalogSkin(skin: CatalogSkin): void {
+  private renderWardrobeCategorySelect(categories: CatalogCategory[]): void {
+    this.wardrobeCategorySelect.replaceChildren();
+
+    if (categories.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'Aucune categorie';
+      this.wardrobeCategorySelect.append(option);
+      this.wardrobeCategorySelect.disabled = true;
+      this.wardrobeCategorySelect.value = '';
+      return;
+    }
+
+    categories.forEach((category) => {
+      const option = document.createElement('option');
+      option.value = category.name;
+      option.textContent = category.name.toUpperCase();
+      this.wardrobeCategorySelect.append(option);
+    });
+
+    this.wardrobeCategorySelect.disabled = false;
+    this.updateWardrobeCategorySelect();
+  }
+
+  private updateWardrobeCategorySelect(): void {
+    if (this.wardrobeCategorySelect.disabled) {
+      return;
+    }
+    this.wardrobeCategorySelect.value = this.selectedWardrobeCategory;
+  }
+
+  private selectWardrobeCategory(categoryName: SkinCategory): void {
+    if (categoryName === this.selectedWardrobeCategory) {
+      return;
+    }
+
+    this.selectedWardrobeCategory = categoryName;
+    this.wardrobeGenderFilter = 'all';
+    this.updateWardrobeCategoryButtons();
+    const selectedCategory = this.wardrobeCategoriesByName.get(categoryName) ?? null;
+    this.renderWardrobeFilterBar(selectedCategory, this.wardrobeCategoriesByName.size);
+    void this.renderWardrobeGallery(selectedCategory, this.wardrobeCategoriesByName.size);
+  }
+
+  private renderWardrobeFilterBar(category: CatalogCategory | null, categoryCount: number): void {
+    this.wardrobeCategoryTitle.textContent = category ? category.name : categoryCount === 0 ? 'Aucune categorie' : '';
+    this.wardrobeFilterButtons.clear();
+    this.wardrobeFilterBar.replaceChildren();
+
+    if (!category || !category.supportsGenderFilter) {
+      this.wardrobeGenderFilter = 'all';
+      this.wardrobeFilterBar.style.display = 'none';
+      return;
+    }
+
+    this.wardrobeFilterBar.style.display = 'flex';
+    const filters: Array<{ value: WardrobeGenderFilter; label: string }> = [
+      { value: 'all', label: 'ALL' },
+      { value: 'male', label: 'MALE' },
+      { value: 'female', label: 'FEMALE' },
+    ];
+
+    filters.forEach((entry) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'menu-button wardrobe-filter-button';
+      button.textContent = entry.label;
+      button.addEventListener('click', () => {
+        if (this.wardrobeGenderFilter === entry.value) {
+          return;
+        }
+        this.wardrobeGenderFilter = entry.value;
+        this.updateWardrobeFilterButtons();
+        void this.renderWardrobeGallery(category, categoryCount);
+      });
+      this.wardrobeFilterButtons.set(entry.value, button);
+      this.wardrobeFilterBar.append(button);
+    });
+
+    this.updateWardrobeFilterButtons();
+  }
+
+  private updateWardrobeCategoryButtons(): void {
+    this.wardrobeCategoryButtons.forEach((button, category) => {
+      button.classList.toggle('active', category === this.selectedWardrobeCategory);
+    });
+    this.updateWardrobeCategorySelect();
+  }
+
+  private updateWardrobeFilterButtons(): void {
+    this.wardrobeFilterButtons.forEach((button, filter) => {
+      button.classList.toggle('active', filter === this.wardrobeGenderFilter);
+    });
+  }
+
+  private filterWardrobeSkins(skins: CatalogSkin[]): CatalogSkin[] {
+    if (this.wardrobeGenderFilter === 'all') {
+      return skins;
+    }
+    return skins.filter((skin) => skin.gender === this.wardrobeGenderFilter);
+  }
+
+  private getWardrobeGalleryKey(selectedCategory: CatalogCategory | null): string {
+    if (!selectedCategory) {
+      return '__none__';
+    }
+    return `${selectedCategory.name}:${this.wardrobeGenderFilter}`;
+  }
+
+  private async renderWardrobeGallery(
+    selectedCategory: CatalogCategory | null,
+    categoryCount: number,
+  ): Promise<void> {
+    if (this.currentWardrobeGalleryKey) {
+      this.wardrobeGalleryScrollByKey.set(this.currentWardrobeGalleryKey, this.wardrobeGallery.scrollTop);
+    }
+
+    const requestId = ++this.wardrobeRenderRequestId;
+    const nextGalleryKey = this.getWardrobeGalleryKey(selectedCategory);
+    const restoreScrollTop = this.wardrobeGalleryScrollByKey.get(nextGalleryKey) ?? 0;
+
+    this.disposeWardrobeCardPreviews();
+    this.resetWardrobeGalleryPagination();
+    this.wardrobeGallery.replaceChildren();
+    this.wardrobeGallery.scrollTop = 0;
+    this.currentWardrobeGalleryKey = nextGalleryKey;
+    this.setWardrobeLoadingIndicator(false);
+
+    if (!selectedCategory) {
+      this.wardrobeEmptyLabel.style.display = '';
+      this.wardrobeEmptyLabel.textContent = categoryCount === 0 ? 'Aucune categorie.' : 'Aucun skin.';
+      return;
+    }
+
+    const skins = this.filterWardrobeSkins(getCatalogSkins(selectedCategory.name));
+    if (skins.length === 0) {
+      this.wardrobeEmptyLabel.style.display = '';
+      this.wardrobeEmptyLabel.textContent = 'Aucun skin.';
+      return;
+    }
+
+    this.wardrobeEmptyLabel.style.display = 'none';
+    this.wardrobeEmptyLabel.textContent = '';
+    this.wardrobeGalleryPendingSkins = skins;
+    this.wardrobeGalleryNextIndex = 0;
+    this.wardrobeGalleryLoading = false;
+
+    this.wardrobeGallerySentinel = document.createElement('div');
+    this.wardrobeGallerySentinel.className = 'wardrobe-gallery-sentinel';
+    this.wardrobeGallery.append(this.wardrobeGallerySentinel);
+
+    this.wardrobeGalleryLoadObserver = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) {
+          return;
+        }
+        void this.loadNextWardrobeGalleryChunk(requestId);
+      },
+      {
+        root: this.wardrobeGallery,
+        rootMargin: '220px 0px',
+        threshold: 0,
+      },
+    );
+    this.wardrobeGalleryLoadObserver.observe(this.wardrobeGallerySentinel);
+
+    await this.loadNextWardrobeGalleryChunk(requestId);
+    while (
+      requestId === this.wardrobeRenderRequestId &&
+      this.currentScreen === 'wardrobe' &&
+      this.wardrobeGalleryNextIndex < this.wardrobeGalleryPendingSkins.length &&
+      this.wardrobeGallery.scrollHeight < restoreScrollTop + this.wardrobeGallery.clientHeight + 24
+    ) {
+      await this.loadNextWardrobeGalleryChunk(requestId);
+    }
+    if (requestId === this.wardrobeRenderRequestId && this.currentScreen === 'wardrobe') {
+      this.wardrobeGallery.scrollTop = restoreScrollTop;
+    }
+    this.renderWardrobeSkinName(this.resolvePendingWardrobeSkinName());
+  }
+
+  private resetWardrobeGalleryPagination(): void {
+    if (this.wardrobeGalleryLoadObserver) {
+      this.wardrobeGalleryLoadObserver.disconnect();
+      this.wardrobeGalleryLoadObserver = null;
+    }
+    if (this.wardrobeGallerySentinel) {
+      this.wardrobeGallerySentinel.remove();
+      this.wardrobeGallerySentinel = null;
+    }
+    this.wardrobeGalleryPendingSkins = [];
+    this.wardrobeGalleryNextIndex = 0;
+    this.wardrobeGalleryLoading = false;
+    this.setWardrobeLoadingIndicator(false);
+  }
+
+  private setWardrobeLoadingIndicator(loading: boolean): void {
+    this.wardrobeLoadingIndicator.classList.toggle('visible', loading);
+    this.wardrobeLoadingIndicator.setAttribute('aria-hidden', loading ? 'false' : 'true');
+  }
+
+  private async loadNextWardrobeGalleryChunk(requestId: number): Promise<void> {
+    if (this.wardrobeGalleryLoading) {
+      return;
+    }
+
+    const total = this.wardrobeGalleryPendingSkins.length;
+    if (this.wardrobeGalleryNextIndex >= total) {
+      this.setWardrobeLoadingIndicator(false);
+      return;
+    }
+
+    const start = this.wardrobeGalleryNextIndex;
+    const end = Math.min(start + this.wardrobeGalleryChunkSize, total);
+    const chunk = this.wardrobeGalleryPendingSkins.slice(start, end);
+    this.wardrobeGalleryLoading = true;
+    this.setWardrobeLoadingIndicator(true);
+
+    try {
+      const loadedChunk = await Promise.all(
+        chunk.map(async (skin) => ({
+          skin,
+          url: await loadCatalogSkinUrl(skin),
+        })),
+      );
+
+      if (requestId !== this.wardrobeRenderRequestId || this.currentScreen !== 'wardrobe') {
+        return;
+      }
+
+      const observer = this.ensureWardrobeCardObserver();
+      const fragment = document.createDocumentFragment();
+
+      loadedChunk.forEach(({ skin, url }) => {
+        if (!url) {
+          return;
+        }
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'wardrobe-skin-card';
+        button.dataset.skinUrl = url;
+        button.title = skin.name;
+        button.classList.toggle('selected', url === this.wardrobePendingSkinUrl);
+        button.addEventListener('click', () => this.selectCatalogSkin(skin, url));
+
+        const preview = document.createElement('div');
+        preview.className = 'wardrobe-skin-preview-3d';
+        preview.dataset.skinUrl = url;
+        observer.observe(preview);
+
+        const label = document.createElement('span');
+        label.className = 'wardrobe-skin-card-name';
+        label.textContent = this.formatWardrobeSkinName(skin.name);
+        button.append(preview, label);
+        fragment.append(button);
+
+        if (url === this.wardrobePendingSkinUrl) {
+          this.wardrobePendingSkinName = skin.name;
+        }
+      });
+
+      if (this.wardrobeGallerySentinel) {
+        this.wardrobeGallery.insertBefore(fragment, this.wardrobeGallerySentinel);
+      } else {
+        this.wardrobeGallery.append(fragment);
+      }
+
+      this.wardrobeGalleryNextIndex = end;
+      this.highlightSelectedWardrobeCard();
+
+      if (end >= total) {
+        if (this.wardrobeGalleryLoadObserver) {
+          this.wardrobeGalleryLoadObserver.disconnect();
+          this.wardrobeGalleryLoadObserver = null;
+        }
+        if (this.wardrobeGallerySentinel) {
+          this.wardrobeGallerySentinel.remove();
+          this.wardrobeGallerySentinel = null;
+        }
+        this.setWardrobeLoadingIndicator(false);
+        return;
+      }
+
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
+
+      if (this.wardrobeGallery.scrollHeight <= this.wardrobeGallery.clientHeight + 8) {
+        requestAnimationFrame(() => {
+          void this.loadNextWardrobeGalleryChunk(requestId);
+        });
+      } else {
+        this.setWardrobeLoadingIndicator(false);
+      }
+    } finally {
+      this.wardrobeGalleryLoading = false;
+      if (requestId !== this.wardrobeRenderRequestId || this.currentScreen !== 'wardrobe') {
+        this.setWardrobeLoadingIndicator(false);
+      }
+    }
+  }
+
+  private ensureWardrobeCardObserver(): IntersectionObserver {
+    if (this.wardrobeCardObserver) {
+      return this.wardrobeCardObserver;
+    }
+
+    this.wardrobeCardObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const host = entry.target as HTMLElement;
+          if (!entry.isIntersecting) {
+            this.disposeWardrobeCardViewer(host);
+            return;
+          }
+
+          if (this.wardrobeCardViewers.has(host)) {
+            return;
+          }
+
+          const skinUrl = host.dataset.skinUrl;
+          if (!skinUrl) {
+            return;
+          }
+
+          const viewer = new SkinViewer(host, skinUrl, { animated: false });
+          this.wardrobeCardViewers.set(host, viewer);
+        });
+      },
+      {
+        root: this.wardrobeGallery,
+        rootMargin: '40px 0px',
+        threshold: 0.05,
+      },
+    );
+
+    return this.wardrobeCardObserver;
+  }
+
+  private disposeWardrobeCardViewer(host: HTMLElement): void {
+    const viewer = this.wardrobeCardViewers.get(host);
+    if (!viewer) {
+      return;
+    }
+    viewer.dispose();
+    this.wardrobeCardViewers.delete(host);
+  }
+
+  private disposeWardrobeCardPreviews(): void {
+    if (this.wardrobeCardObserver) {
+      this.wardrobeCardObserver.disconnect();
+      this.wardrobeCardObserver = null;
+    }
+    this.wardrobeCardViewers.forEach((viewer) => viewer.dispose());
+    this.wardrobeCardViewers.clear();
+  }
+
+  private disposeWardrobeCategoryPreviews(): void {
+    while (this.wardrobeCategoryViewers.length > 0) {
+      const viewer = this.wardrobeCategoryViewers.pop();
+      if (viewer) {
+        viewer.dispose();
+      }
+    }
+  }
+
+  private highlightSelectedWardrobeCard(): void {
+    const selectedUrl = this.wardrobePendingSkinUrl;
+    this.wardrobeGallery.querySelectorAll<HTMLButtonElement>('.wardrobe-skin-card').forEach((button) => {
+      button.classList.toggle(
+        'selected',
+        selectedUrl !== null && button.dataset.skinUrl === selectedUrl,
+      );
+    });
+  }
+
+  private resolveCommittedWardrobeSkinName(): string {
+    const selectedUrl = this.settings.skinDataUrl;
+    if (!selectedUrl) {
+      return 'Default Skin';
+    }
+    if (this.selectedSkinName) {
+      return this.selectedSkinName;
+    }
+    const catalogName = findCatalogSkinNameByUrl(selectedUrl);
+    if (catalogName) {
+      this.selectedSkinName = this.formatWardrobeSkinName(catalogName);
+      return this.selectedSkinName;
+    }
+    if (this.importedSkinName) {
+      this.selectedSkinName = this.importedSkinName;
+      return this.importedSkinName;
+    }
+    return 'Imported Skin';
+  }
+
+  private resolvePendingWardrobeSkinName(): string {
+    const selectedUrl = this.wardrobePendingSkinUrl;
+    if (!selectedUrl) {
+      this.wardrobePendingSkinName = 'Default Skin';
+      return 'Default Skin';
+    }
+    if (this.wardrobePendingSkinName) {
+      return this.wardrobePendingSkinName;
+    }
+    const catalogName = findCatalogSkinNameByUrl(selectedUrl);
+    if (catalogName) {
+      this.wardrobePendingSkinName = this.formatWardrobeSkinName(catalogName);
+      return this.wardrobePendingSkinName;
+    }
+    if (this.wardrobePendingImportedSkinName) {
+      this.wardrobePendingSkinName = this.wardrobePendingImportedSkinName;
+      return this.wardrobePendingImportedSkinName;
+    }
+    this.wardrobePendingSkinName = 'Imported Skin';
+    return 'Imported Skin';
+  }
+
+  private formatWardrobeSkinName(name: string): string {
+    if (!name) {
+      return name;
+    }
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+
+  private selectCatalogSkin(skin: CatalogSkin, skinUrl: string): void {
     this.selectedWardrobeCategory = skin.category;
-    this.selectedSkinUrl = skin.url;
-    this.commitSkinSelection(skin.url);
-    this.renderWardrobe();
-    this.updateViewerSkins();
+    this.wardrobePendingSkinUrl = skinUrl;
+    this.wardrobePendingImportedSkinName = null;
+    this.wardrobePendingSkinName = this.formatWardrobeSkinName(skin.name);
+    this.highlightSelectedWardrobeCard();
+    this.renderWardrobeSkinName(this.wardrobePendingSkinName);
+    void this.wardrobeSkinViewer.setSkin(skinUrl);
+    this.updateWardrobeValidateButton();
   }
 
   private syncSkinSelectionFromSettings(): void {
     const selectedUrl = this.settings.skinDataUrl;
-    const catalogSkin =
-      selectedUrl === null
-        ? null
-        : getSkinCategories()
-            .flatMap((category) => category.skins)
-            .find((skin) => skin.url === selectedUrl) ?? null;
+    this.selectedSkinUrl = selectedUrl;
 
+    if (!selectedUrl) {
+      this.selectedSkinName = 'Default Skin';
+      return;
+    }
+
+    const catalogSkin = findCatalogSkinByUrl(selectedUrl);
     if (catalogSkin) {
       this.selectedWardrobeCategory = catalogSkin.category;
-      this.selectedSkinUrl = catalogSkin.url;
-    } else if (selectedUrl) {
-      this.selectedSkinUrl = selectedUrl;
-    } else {
-      this.selectedSkinUrl = null;
+      this.importedSkinName = null;
+      this.selectedSkinName = this.formatWardrobeSkinName(catalogSkin.name);
+      return;
     }
+
+    if (this.importedSkinName) {
+      this.selectedSkinName = this.importedSkinName;
+    } else {
+      this.selectedSkinName = 'Imported Skin';
+    }
+  }
+
+  private resetWardrobePendingSelection(): void {
+    this.wardrobePendingSkinUrl = this.selectedSkinUrl;
+    this.wardrobePendingImportedSkinName = this.importedSkinName;
+    this.wardrobePendingSkinName = this.resolveCommittedWardrobeSkinName();
+    this.updateWardrobeValidateButton();
+  }
+
+  private discardWardrobePendingSelection(): void {
+    this.resetWardrobePendingSelection();
+  }
+
+  private hasWardrobePendingChanges(): boolean {
+    return this.wardrobePendingSkinUrl !== this.settings.skinDataUrl;
+  }
+
+  private updateWardrobeValidateButton(): void {
+    this.wardrobeValidateButton.disabled = !this.hasWardrobePendingChanges();
+  }
+
+  private applyWardrobePendingSelection(): void {
+    if (!this.hasWardrobePendingChanges()) {
+      return;
+    }
+
+    this.selectedSkinUrl = this.wardrobePendingSkinUrl;
+    this.importedSkinName = this.wardrobePendingImportedSkinName;
+    this.selectedSkinName = this.wardrobePendingSkinName;
+    this.commitSkinSelection(this.wardrobePendingSkinUrl);
+    this.updateWardrobeValidateButton();
   }
 
   private updateViewerSkins(): void {
     void this.homeSkinViewer.setSkin(this.settings.skinDataUrl);
-    void this.wardrobeSkinViewer.setSkin(this.settings.skinDataUrl);
+    const wardrobeSkinUrl =
+      this.currentScreen === 'wardrobe' ? this.wardrobePendingSkinUrl : this.settings.skinDataUrl;
+    void this.wardrobeSkinViewer.setSkin(wardrobeSkinUrl);
   }
 
   private alignHomeToViewportCenter(): void {
@@ -1177,21 +1810,51 @@ export class StartMenu {
     this.wardrobeSkinName.replaceChildren(label);
   }
 
-  private disposeWardrobeCategoryViewers(): void {
-    this.wardrobeCategoryViewers.forEach((viewer) => viewer.dispose());
-    this.wardrobeCategoryViewers = [];
+  private cleanupWardrobeView(): void {
+    this.wardrobeCategoryRenderRequestId += 1;
+    this.wardrobeRenderRequestId += 1;
+    this.disposeWardrobeCategoryPreviews();
+    this.disposeWardrobeCardPreviews();
+    this.resetWardrobeGalleryPagination();
+    this.wardrobeCategoryButtons.clear();
+    this.wardrobeCategoriesByName.clear();
+    this.wardrobeCategoriesRenderKey = '';
+    this.wardrobeGalleryScrollByKey.clear();
+    this.currentWardrobeGalleryKey = null;
+    this.wardrobeFilterButtons.clear();
+    this.wardrobeCategoryList.replaceChildren();
+    this.wardrobeCategoryScrollTop = 0;
+    this.wardrobeCategoryList.scrollTop = 0;
+    this.wardrobeCategorySelect.replaceChildren();
+    this.wardrobeCategorySelect.disabled = true;
+    this.wardrobeCategorySelect.value = '';
+    this.wardrobeFilterBar.replaceChildren();
+    this.wardrobeFilterBar.style.display = 'none';
+    this.wardrobeCategoryTitle.textContent = '';
+    this.setWardrobeLoadingIndicator(false);
+    this.wardrobeGallery.replaceChildren();
+    this.wardrobeEmptyLabel.style.display = 'none';
+    this.wardrobeEmptyLabel.textContent = '';
+    clearCatalogSkinLookupCache();
   }
 
   private commitSkinSelection(skinDataUrl: string | null): void {
+    this.selectedSkinUrl = skinDataUrl;
+    if (!skinDataUrl) {
+      this.importedSkinName = null;
+      this.selectedSkinName = 'Default Skin';
+    }
     this.settings = {
       keyBindings: cloneBindings(this.settings.keyBindings),
       skinDataUrl,
       startFullscreen: this.settings.startFullscreen,
+      interfaceSize: this.settings.interfaceSize,
     };
     this.handlers.onSettingsChange({
       keyBindings: cloneBindings(this.settings.keyBindings),
       skinDataUrl,
       startFullscreen: this.settings.startFullscreen,
+      interfaceSize: this.settings.interfaceSize,
     });
   }
 
@@ -1226,6 +1889,7 @@ export class StartMenu {
       keyBindings: cloneBindings(this.settings.keyBindings),
       skinDataUrl: this.settings.skinDataUrl,
       startFullscreen: this.settings.startFullscreen,
+      interfaceSize: this.settings.interfaceSize,
     });
   }
 

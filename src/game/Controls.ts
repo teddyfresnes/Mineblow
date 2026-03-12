@@ -24,7 +24,12 @@ export interface GameSettings {
   keyBindings: KeyBindings;
   skinDataUrl: string | null;
   startFullscreen: boolean;
+  interfaceSize: number;
 }
+
+export const DEFAULT_INTERFACE_SIZE = 5;
+export const MIN_INTERFACE_SIZE = 1;
+export const MAX_INTERFACE_SIZE = 8;
 
 export const CONTROL_LABELS: Record<ControlAction, string> = {
   moveForward: 'Move Forward',
@@ -56,7 +61,32 @@ export const createDefaultSettings = (): GameSettings => ({
   keyBindings: structuredClone(DEFAULT_KEY_BINDINGS),
   skinDataUrl: null,
   startFullscreen: true,
+  interfaceSize: DEFAULT_INTERFACE_SIZE,
 });
+
+export const normalizeInterfaceSize = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_INTERFACE_SIZE;
+  }
+  const rounded = Math.round(value);
+  return Math.min(MAX_INTERFACE_SIZE, Math.max(MIN_INTERFACE_SIZE, rounded));
+};
+
+export const getNextInterfaceSize = (current: number): number => {
+  const normalized = normalizeInterfaceSize(current);
+  if (normalized >= MAX_INTERFACE_SIZE) {
+    return MIN_INTERFACE_SIZE;
+  }
+  return normalized + 1;
+};
+
+export const getInterfaceZoomPercent = (interfaceSize: number): number => {
+  const normalized = normalizeInterfaceSize(interfaceSize);
+  if (normalized <= DEFAULT_INTERFACE_SIZE) {
+    return 100 + (DEFAULT_INTERFACE_SIZE - normalized) * 20;
+  }
+  return Math.max(10, 100 - (normalized - DEFAULT_INTERFACE_SIZE) * 10);
+};
 
 export const cloneBindings = (bindings: KeyBindings): KeyBindings => {
   const clone = {} as KeyBindings;
