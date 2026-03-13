@@ -2,7 +2,6 @@ import {
   Clock,
   CubeTexture,
   LinearFilter,
-  LinearMipmapLinearFilter,
   PerspectiveCamera,
   Scene,
   SRGBColorSpace,
@@ -27,6 +26,11 @@ const CUBEMAP_FACE_SOURCE_INDEX = [
   2, // -Z
 ] as const;
 
+const IS_FIREFOX = typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent);
+const PANORAMA_PIXEL_RATIO_CAP = IS_FIREFOX ? 0.85 : 1;
+const PANORAMA_TARGET_FPS = IS_FIREFOX ? 24 : 30;
+const PANORAMA_MIN_FRAME_MS = 1000 / PANORAMA_TARGET_FPS;
+
 export class MenuPanorama {
   private readonly scene = new Scene();
   private readonly camera = new PerspectiveCamera(85, 1, 0.05, 10);
@@ -35,6 +39,8 @@ export class MenuPanorama {
   private readonly clock = new Clock();
   private readonly cubeTexture = new CubeTexture();
   private rafId = 0;
+  private active = true;
+  private lastRenderAt = 0;
   private disposed = false;
 
   constructor(private readonly container: HTMLElement) {
@@ -43,16 +49,16 @@ export class MenuPanorama {
       alpha: true,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, PANORAMA_PIXEL_RATIO_CAP));
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.domElement.className = 'menu-panorama-canvas';
     this.container.append(this.renderer.domElement);
 
     this.cubeTexture.colorSpace = SRGBColorSpace;
-    this.cubeTexture.generateMipmaps = true;
+    this.cubeTexture.generateMipmaps = false;
     this.cubeTexture.magFilter = LinearFilter;
-    this.cubeTexture.minFilter = LinearMipmapLinearFilter;
+    this.cubeTexture.minFilter = LinearFilter;
     this.cubeTexture.needsUpdate = true;
     this.scene.background = this.cubeTexture;
     void this.loadCubeTexture();
@@ -61,12 +67,24 @@ export class MenuPanorama {
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.container);
     this.resize();
-    this.animate();
+    this.startLoop();
+  }
+
+  setActive(active: boolean): void {
+    if (this.disposed || this.active === active) {
+      return;
+    }
+    this.active = active;
+    if (this.active) {
+      this.startLoop();
+    } else {
+      this.stopLoop();
+    }
   }
 
   dispose(): void {
     this.disposed = true;
-    cancelAnimationFrame(this.rafId);
+    this.stopLoop();
     this.resizeObserver.disconnect();
     this.scene.background = null;
     this.cubeTexture.dispose();
@@ -75,12 +93,30 @@ export class MenuPanorama {
   }
 
   private resize(): void {
+    if (this.disposed) {
+      return;
+    }
     const width = Math.max(20, this.container.clientWidth);
     const height = Math.max(20, this.container.clientHeight);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, PANORAMA_PIXEL_RATIO_CAP));
     this.renderer.setSize(width, height, false);
+  }
+
+  private startLoop(): void {
+    if (this.disposed || !this.active || this.rafId !== 0) {
+      return;
+    }
+    this.lastRenderAt = 0;
+    this.rafId = requestAnimationFrame(this.animate);
+  }
+
+  private stopLoop(): void {
+    if (this.rafId !== 0) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = 0;
+    }
   }
 
   private async loadCubeTexture(): Promise<void> {
@@ -114,12 +150,17 @@ export class MenuPanorama {
     });
   }
 
-  private animate = (): void => {
-    if (this.disposed) {
+  private animate = (timestamp: number): void => {
+    if (this.disposed || !this.active) {
+      this.rafId = 0;
       return;
     }
 
     this.rafId = requestAnimationFrame(this.animate);
+    if (this.lastRenderAt !== 0 && timestamp - this.lastRenderAt < PANORAMA_MIN_FRAME_MS) {
+      return;
+    }
+    this.lastRenderAt = timestamp;
     const elapsedSeconds = this.clock.getElapsedTime();
     const pitch = ((25 + Math.sin(elapsedSeconds * 0.02) * 5) * Math.PI) / 180;
     const yaw = (elapsedSeconds * 2 * Math.PI) / 180;

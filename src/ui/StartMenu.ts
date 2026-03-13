@@ -1,14 +1,16 @@
 import {
   CONTROL_ACTIONS,
-  CONTROL_LABELS,
   cloneBindings,
   createDefaultSettings,
+  getControlLabel,
   getInterfaceZoomPercent,
   getNextInterfaceSize,
   formatKeyCode,
   type ControlAction,
   type GameSettings,
 } from '../game/Controls';
+import { UI_LANGUAGES, getLanguageLabel, translate, type UiLanguage } from '../i18n/Language';
+import type { MenuMessageKey } from '../i18n/messages';
 import {
   createEmptyGlobalStats,
   createEmptyWorldStats,
@@ -49,6 +51,7 @@ type MenuScreen =
   | 'create-world'
   | 'edit-world'
   | 'settings'
+  | 'languages'
   | 'keybindings'
   | 'graphics'
   | 'stats'
@@ -71,6 +74,7 @@ const CLASSIC_SCREENS = new Set<MenuScreen>([
   'create-world',
   'edit-world',
   'settings',
+  'languages',
   'keybindings',
   'graphics',
   'stats',
@@ -83,7 +87,7 @@ const MENU_QUOTES = menuQuotesRaw
 
 const pickMenuQuote = (): string => {
   if (MENU_QUOTES.length === 0) {
-    return 'Build your world, block by block.';
+    return 'Construis ton monde, bloc par bloc.';
   }
   const index = Math.floor(Math.random() * MENU_QUOTES.length);
   return MENU_QUOTES[index];
@@ -99,8 +103,10 @@ export class StartMenu {
   private readonly panorama: MenuPanorama;
   private readonly views = new Map<MenuScreen, HTMLElement>();
   private readonly bindingButtons = new Map<string, HTMLButtonElement>();
+  private readonly languageButtons = new Map<UiLanguage, HTMLButtonElement>();
   private readonly wardrobeCategoryButtons = new Map<SkinCategory, HTMLButtonElement>();
   private readonly statsCategoryButtons = new Map<StatsCategory, HTMLButtonElement>();
+  private readonly localizedUpdaters: Array<() => void> = [];
   private readonly worldPreviewCache = new Map<string, string>();
   private readonly worldList = document.createElement('div');
   private readonly editWorldPreview = document.createElement('div');
@@ -145,11 +151,14 @@ export class StartMenu {
   private selectedWardrobeCategory: SkinCategory = '';
   private wardrobeGenderFilter: WardrobeGenderFilter = 'all';
   private wardrobeRenderRequestId = 0;
-  private wardrobeCategoryRenderRequestId = 0;
   private wardrobeCategoriesRenderKey = '';
   private wardrobeCategoryScrollTop = 0;
   private readonly wardrobeCategoriesByName = new Map<SkinCategory, CatalogCategory>();
   private readonly wardrobeGalleryScrollByKey = new Map<string, number>();
+  private readonly wardrobeCardViewers = new Map<HTMLElement, SkinViewer>();
+  private wardrobeCardObserver: IntersectionObserver | null = null;
+  private readonly wardrobeCategoryViewers = new Map<HTMLElement, SkinViewer>();
+  private wardrobeCategoryObserver: IntersectionObserver | null = null;
   private currentWardrobeGalleryKey: string | null = null;
   private selectedSkinUrl: string | null = null;
   private importedSkinName: string | null = null;
@@ -157,9 +166,6 @@ export class StartMenu {
   private wardrobePendingSkinUrl: string | null = null;
   private wardrobePendingImportedSkinName: string | null = null;
   private wardrobePendingSkinName: string | null = null;
-  private readonly wardrobeCategoryViewers: SkinViewer[] = [];
-  private readonly wardrobeCardViewers = new Map<HTMLElement, SkinViewer>();
-  private wardrobeCardObserver: IntersectionObserver | null = null;
   private wardrobeGalleryLoadObserver: IntersectionObserver | null = null;
   private wardrobeGallerySentinel: HTMLDivElement | null = null;
   private wardrobeGalleryPendingSkins: CatalogSkin[] = [];
@@ -188,6 +194,7 @@ export class StartMenu {
     const createWorldView = this.buildCreateWorldView();
     const editWorldView = this.buildEditWorldView();
     const settingsView = this.buildSettingsView();
+    const languagesView = this.buildLanguagesView();
     const keybindingsView = this.buildKeybindingsView();
     const graphicsView = this.buildGraphicsView();
     const statsView = this.buildStatsView();
@@ -199,6 +206,7 @@ export class StartMenu {
     this.views.set('create-world', createWorldView);
     this.views.set('edit-world', editWorldView);
     this.views.set('settings', settingsView);
+    this.views.set('languages', languagesView);
     this.views.set('keybindings', keybindingsView);
     this.views.set('graphics', graphicsView);
     this.views.set('stats', statsView);
@@ -211,6 +219,7 @@ export class StartMenu {
       createWorldView,
       editWorldView,
       settingsView,
+      languagesView,
       keybindingsView,
       graphicsView,
       statsView,
@@ -222,7 +231,7 @@ export class StartMenu {
     parent.append(this.root);
     window.addEventListener('resize', this.handleHomeAlignmentResize);
 
-    this.createNameInput.value = 'New World';
+    this.createNameInput.value = this.t('worldNamePlaceholder');
     this.wardrobeImportInput.type = 'file';
     this.wardrobeImportInput.accept = 'image/png';
     this.wardrobeImportInput.addEventListener('change', () => {
@@ -259,6 +268,8 @@ export class StartMenu {
     this.renderStatsView();
     this.renderGraphicsView();
     this.renderPauseView();
+    this.renderLanguageView();
+    this.refreshLocalizedText();
     this.updateViewerSkins();
     this.showScreen('home');
     this.alignHomeToViewportCenter();
@@ -268,19 +279,26 @@ export class StartMenu {
   setSettings(settings: GameSettings): void {
     const previousSkinDataUrl = this.settings.skinDataUrl;
     const previousSelectedCategory = this.selectedWardrobeCategory;
+    const previousLanguage = this.settings.language;
     this.settings = {
       keyBindings: cloneBindings(settings.keyBindings),
       skinDataUrl: settings.skinDataUrl,
       startFullscreen: settings.startFullscreen,
       interfaceSize: settings.interfaceSize,
+      language: settings.language,
     };
+    const languageChanged = previousLanguage !== this.settings.language;
     this.renderBindings();
     this.syncSkinSelectionFromSettings();
+    if (languageChanged) {
+      this.refreshLocalizedText();
+    }
     const skinChanged = this.settings.skinDataUrl !== previousSkinDataUrl;
     if (skinChanged) {
       this.resetWardrobePendingSelection();
     }
     this.renderGraphicsView();
+    this.renderLanguageView();
     if (this.currentScreen === 'wardrobe') {
       if (this.wardrobeCategoriesByName.size === 0) {
         this.renderWardrobe();
@@ -357,14 +375,69 @@ export class StartMenu {
     this.root.style.display = 'none';
     this.listeningBinding = null;
     this.renderBindings();
+    this.updateMenuRenderActivity();
   }
 
   isVisible(): boolean {
     return this.root.style.display !== 'none';
   }
 
+  private updateMenuRenderActivity(): void {
+    const visible = this.isVisible();
+    const surface = this.getSurfaceForScreen(this.currentScreen);
+    this.panorama.setActive(visible && surface === 'panorama');
+    this.homeSkinViewer.setActive(visible && this.currentScreen === 'home');
+    this.wardrobeSkinViewer.setActive(visible && this.currentScreen === 'wardrobe');
+  }
+
   getMode(): MenuMode {
     return this.mode;
+  }
+
+  private t(key: MenuMessageKey): string {
+    return translate(`menu.${key}`, {}, this.settings.language);
+  }
+
+  private tf(key: MenuMessageKey, params: Record<string, string>): string {
+    return translate(`menu.${key}`, params, this.settings.language);
+  }
+
+  private registerLocalized(updater: () => void): void {
+    this.localizedUpdaters.push(updater);
+    updater();
+  }
+
+  private localizeText(node: HTMLElement, key: MenuMessageKey): void {
+    this.registerLocalized(() => {
+      node.textContent = this.t(key);
+    });
+  }
+
+  private localizeInputPlaceholder(input: HTMLInputElement, key: MenuMessageKey): void {
+    this.registerLocalized(() => {
+      input.placeholder = this.t(key);
+    });
+  }
+
+  private refreshLocalizedText(): void {
+    this.localizedUpdaters.forEach((updater) => updater());
+    const knownDefaults = new Set<string>(
+      UI_LANGUAGES.map((language) => translate('menu.worldNamePlaceholder', {}, language)),
+    );
+    const currentCreateName = this.createNameInput.value.trim();
+    if (!currentCreateName || knownDefaults.has(currentCreateName)) {
+      this.createNameInput.value = this.t('worldNamePlaceholder');
+    }
+    this.renderWorldSelection();
+    this.renderEditWorldScreen();
+    this.renderBindings();
+    this.renderGraphicsView();
+    this.renderStatsView();
+    this.renderPauseView();
+    this.renderLanguageView();
+    if (this.currentScreen === 'wardrobe') {
+      this.renderWardrobe();
+    }
   }
 
   private buildHomeView(): HTMLElement {
@@ -397,13 +470,13 @@ export class StartMenu {
     const actions = document.createElement('div');
     actions.className = 'title-actions';
     this.homeActionsColumn = actions;
-    const mobileWardrobeButton = this.buildMainButton('Wardrobe', () => this.showScreen('wardrobe'));
+    const mobileWardrobeButton = this.buildMainButton('homeWardrobe', () => this.showScreen('wardrobe'));
     mobileWardrobeButton.classList.add('mobile-wardrobe-button');
     actions.append(
-      this.buildMainButton('Solo', () => this.showScreen('singleplayer')),
-      this.buildMainButton('Multijoueur (soon !)', () => undefined, true),
-      this.buildMainButton('Stats', () => this.showScreen('stats')),
-      this.buildMainButton('Settings', () => this.showScreen('settings')),
+      this.buildMainButton('homeSolo', () => this.showScreen('singleplayer')),
+      this.buildMainButton('homeMultiplayerSoon', () => undefined, true),
+      this.buildMainButton('homeStats', () => this.showScreen('stats')),
+      this.buildMainButton('homeSettings', () => this.showScreen('settings')),
       mobileWardrobeButton,
     );
 
@@ -413,12 +486,14 @@ export class StartMenu {
     right.className = 'home-right-column home-avatar-column';
     const viewerStage = document.createElement('div');
     viewerStage.className = 'menu-player-stage bare-player-stage home-avatar-stage';
-    this.homeSkinViewer = new SkinViewer(viewerStage, null, { animationMode: 'idle' });
+    this.homeSkinViewer = new SkinViewer(viewerStage, null, { animationMode: 'spin' });
 
     const wardrobeButton = document.createElement('button');
     wardrobeButton.type = 'button';
     wardrobeButton.className = 'wardrobe-launch-button';
-    wardrobeButton.setAttribute('aria-label', 'Vestiaire');
+    this.registerLocalized(() => {
+      wardrobeButton.setAttribute('aria-label', this.t('homeWardrobe'));
+    });
     wardrobeButton.addEventListener('click', () => this.showScreen('wardrobe'));
     const wardrobeIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     wardrobeIcon.setAttribute('viewBox', '0 0 24 24');
@@ -443,7 +518,7 @@ export class StartMenu {
     const view = document.createElement('section');
     view.className = 'menu-view menu-view-classic singleplayer-view';
 
-    view.append(this.buildClassicTitle('Select World'));
+    view.append(this.buildClassicTitle('singleplayerTitle'));
 
     const frame = document.createElement('div');
     frame.className = 'classic-screen-frame world-select-frame';
@@ -459,7 +534,7 @@ export class StartMenu {
 
     this.playWorldButton.type = 'button';
     this.playWorldButton.className = 'menu-button';
-    this.playWorldButton.textContent = 'Jouer';
+    this.localizeText(this.playWorldButton, 'play');
     this.playWorldButton.addEventListener('click', () => {
       if (this.selectedWorldId) {
         this.handlers.onPlayWorld(this.selectedWorldId);
@@ -469,7 +544,7 @@ export class StartMenu {
     const createButton = document.createElement('button');
     createButton.type = 'button';
     createButton.className = 'menu-button';
-    createButton.textContent = 'Creer un monde';
+    this.localizeText(createButton, 'createWorld');
     createButton.addEventListener('click', () => this.openCreateWorldScreen());
 
     primaryRow.append(this.playWorldButton, createButton);
@@ -479,18 +554,18 @@ export class StartMenu {
 
     this.editWorldButton.type = 'button';
     this.editWorldButton.className = 'menu-button';
-    this.editWorldButton.textContent = 'Modifier';
+    this.localizeText(this.editWorldButton, 'edit');
     this.editWorldButton.addEventListener('click', () => this.openEditWorldScreen());
 
     this.deleteWorldButton.type = 'button';
     this.deleteWorldButton.className = 'menu-button';
-    this.deleteWorldButton.textContent = 'Supprimer';
+    this.localizeText(this.deleteWorldButton, 'delete');
     this.deleteWorldButton.addEventListener('click', () => {
       const world = this.getSelectedWorld();
       if (!world) {
         return;
       }
-      if (window.confirm(`Supprimer le monde "${world.name}" ?`)) {
+      if (window.confirm(this.tf('deleteWorldConfirm', { world: world.name }))) {
         this.handlers.onDeleteWorld(world.id);
       }
     });
@@ -498,7 +573,7 @@ export class StartMenu {
     const backButton = document.createElement('button');
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
-    backButton.textContent = 'Back';
+    this.localizeText(backButton, 'back');
     backButton.addEventListener('click', () => this.showScreen('home'));
 
     secondaryRow.append(this.editWorldButton, this.deleteWorldButton, backButton);
@@ -512,7 +587,7 @@ export class StartMenu {
     const view = document.createElement('section');
     view.className = 'menu-view menu-view-classic create-world-view';
 
-    view.append(this.buildClassicTitle('Create New World'));
+    view.append(this.buildClassicTitle('createWorldTitle'));
 
     const frame = document.createElement('div');
     frame.className = 'classic-screen-frame form-screen-frame';
@@ -523,17 +598,17 @@ export class StartMenu {
     const nameGroup = document.createElement('label');
     nameGroup.className = 'classic-input-group';
     const nameLabel = document.createElement('span');
-    nameLabel.textContent = 'World Name';
+    this.localizeText(nameLabel, 'worldNameLabel');
     this.createNameInput.type = 'text';
-    this.createNameInput.placeholder = 'New World';
+    this.localizeInputPlaceholder(this.createNameInput, 'worldNamePlaceholder');
     nameGroup.append(nameLabel, this.createNameInput);
 
     const seedGroup = document.createElement('label');
     seedGroup.className = 'classic-input-group';
     const seedLabel = document.createElement('span');
-    seedLabel.textContent = 'Seed for the world generator';
+    this.localizeText(seedLabel, 'worldSeedLabel');
     this.createSeedInput.type = 'text';
-    this.createSeedInput.placeholder = 'Laisse vide pour une seed aleatoire';
+    this.localizeInputPlaceholder(this.createSeedInput, 'worldSeedPlaceholder');
     seedGroup.append(seedLabel, this.createSeedInput);
 
     content.append(nameGroup, seedGroup);
@@ -545,9 +620,9 @@ export class StartMenu {
     const createButton = document.createElement('button');
     createButton.type = 'button';
     createButton.className = 'menu-button';
-    createButton.textContent = 'Create New World';
+    this.localizeText(createButton, 'createWorldAction');
     createButton.addEventListener('click', () => {
-      const name = this.createNameInput.value.trim() || 'New World';
+      const name = this.createNameInput.value.trim() || this.t('worldNamePlaceholder');
       const seed = this.createSeedInput.value.trim();
       this.handlers.onCreateWorld(name, seed);
       this.createSeedInput.value = '';
@@ -556,7 +631,7 @@ export class StartMenu {
     const backButton = document.createElement('button');
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
-    backButton.textContent = 'Back';
+    this.localizeText(backButton, 'back');
     backButton.addEventListener('click', () => this.showScreen('singleplayer'));
 
     footer.append(createButton, backButton);
@@ -568,7 +643,7 @@ export class StartMenu {
     const view = document.createElement('section');
     view.className = 'menu-view menu-view-classic edit-world-view';
 
-    view.append(this.buildClassicTitle('Edit World'));
+    view.append(this.buildClassicTitle('editWorldTitle'));
 
     const frame = document.createElement('div');
     frame.className = 'classic-screen-frame form-screen-frame';
@@ -586,9 +661,9 @@ export class StartMenu {
     const nameGroup = document.createElement('label');
     nameGroup.className = 'classic-input-group';
     const nameLabel = document.createElement('span');
-    nameLabel.textContent = 'World Name';
+    this.localizeText(nameLabel, 'worldNameLabel');
     this.editNameInput.type = 'text';
-    this.editNameInput.placeholder = 'World name';
+    this.localizeInputPlaceholder(this.editNameInput, 'worldNameLabel');
     nameGroup.append(nameLabel, this.editNameInput);
 
     detail.append(this.editWorldTitle, this.editWorldMeta, nameGroup);
@@ -600,7 +675,7 @@ export class StartMenu {
 
     this.saveEditWorldButton.type = 'button';
     this.saveEditWorldButton.className = 'menu-button';
-    this.saveEditWorldButton.textContent = 'Save';
+    this.localizeText(this.saveEditWorldButton, 'save');
     this.saveEditWorldButton.addEventListener('click', () => {
       const world = this.getSelectedWorld();
       if (!world) {
@@ -613,7 +688,7 @@ export class StartMenu {
     const backButton = document.createElement('button');
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
-    backButton.textContent = 'Back';
+    this.localizeText(backButton, 'back');
     backButton.addEventListener('click', () => this.showScreen('singleplayer'));
 
     footer.append(this.saveEditWorldButton, backButton);
@@ -625,7 +700,7 @@ export class StartMenu {
     const view = document.createElement('section');
     view.className = 'menu-view menu-view-classic settings-view';
 
-    view.append(this.buildClassicTitle('Settings'));
+    view.append(this.buildClassicTitle('settingsTitle'));
 
     const frame = document.createElement('div');
     frame.className = 'classic-screen-frame settings-screen-frame';
@@ -635,16 +710,25 @@ export class StartMenu {
     const keyBindingsButton = document.createElement('button');
     keyBindingsButton.type = 'button';
     keyBindingsButton.className = 'menu-button settings-compact-button';
-    keyBindingsButton.textContent = 'Assignation des touches';
+    this.localizeText(keyBindingsButton, 'keyBindings');
     keyBindingsButton.addEventListener('click', () => this.showScreen('keybindings'));
 
     const graphicsButton = document.createElement('button');
     graphicsButton.type = 'button';
     graphicsButton.className = 'menu-button settings-compact-button';
-    graphicsButton.textContent = 'Options graphiques';
+    this.localizeText(graphicsButton, 'graphics');
     graphicsButton.addEventListener('click', () => this.showScreen('graphics'));
 
-    buttonStack.append(keyBindingsButton, graphicsButton);
+    const languageButton = document.createElement('button');
+    languageButton.type = 'button';
+    languageButton.className = 'menu-button settings-compact-button settings-language-button';
+    this.registerLocalized(() => {
+      const languageName = getLanguageLabel(this.settings.language, this.settings.language);
+      languageButton.textContent = `${this.t('language')}: ${languageName}`;
+    });
+    languageButton.addEventListener('click', () => this.showScreen('languages'));
+
+    buttonStack.append(keyBindingsButton, graphicsButton, languageButton);
     frame.append(buttonStack);
 
     const footer = document.createElement('div');
@@ -652,8 +736,66 @@ export class StartMenu {
     const backButton = document.createElement('button');
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
-    backButton.textContent = 'Back';
+    this.localizeText(backButton, 'back');
     backButton.addEventListener('click', () => this.showScreen(this.mode === 'pause' ? 'pause' : 'home'));
+    footer.append(backButton);
+
+    view.append(frame, footer);
+    return view;
+  }
+
+  private buildLanguagesView(): HTMLElement {
+    const view = document.createElement('section');
+    view.className = 'menu-view menu-view-classic languages-view';
+
+    view.append(this.buildClassicTitle('languagesTitle'));
+
+    const frame = document.createElement('div');
+    frame.className = 'classic-screen-frame settings-screen-frame';
+
+    const stack = document.createElement('div');
+    stack.className = 'classic-button-stack graphics-options-stack';
+
+    UI_LANGUAGES.forEach((language) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'menu-button settings-compact-button classic-tab-button';
+      this.registerLocalized(() => {
+        button.textContent = getLanguageLabel(language, this.settings.language);
+      });
+      button.addEventListener('click', () => {
+        if (this.settings.language === language) {
+          return;
+        }
+        this.settings = {
+          keyBindings: cloneBindings(this.settings.keyBindings),
+          skinDataUrl: this.settings.skinDataUrl,
+          startFullscreen: this.settings.startFullscreen,
+          interfaceSize: this.settings.interfaceSize,
+          language,
+        };
+        this.refreshLocalizedText();
+        this.handlers.onSettingsChange({
+          keyBindings: cloneBindings(this.settings.keyBindings),
+          skinDataUrl: this.settings.skinDataUrl,
+          startFullscreen: this.settings.startFullscreen,
+          interfaceSize: this.settings.interfaceSize,
+          language,
+        });
+      });
+      this.languageButtons.set(language, button);
+      stack.append(button);
+    });
+
+    frame.append(stack);
+
+    const footer = document.createElement('div');
+    footer.className = 'classic-footer-row one-column';
+    const backButton = document.createElement('button');
+    backButton.type = 'button';
+    backButton.className = 'menu-button secondary';
+    this.localizeText(backButton, 'back');
+    backButton.addEventListener('click', () => this.showScreen('settings'));
     footer.append(backButton);
 
     view.append(frame, footer);
@@ -664,7 +806,7 @@ export class StartMenu {
     const view = document.createElement('section');
     view.className = 'menu-view menu-view-classic graphics-view';
 
-    view.append(this.buildClassicTitle('Options graphiques'));
+    view.append(this.buildClassicTitle('graphicsTitle'));
 
     const frame = document.createElement('div');
     frame.className = 'classic-screen-frame settings-screen-frame';
@@ -680,6 +822,7 @@ export class StartMenu {
         skinDataUrl: this.settings.skinDataUrl,
         startFullscreen: !this.settings.startFullscreen,
         interfaceSize: this.settings.interfaceSize,
+        language: this.settings.language,
       };
       this.renderGraphicsView();
       this.handlers.onSettingsChange({
@@ -687,6 +830,7 @@ export class StartMenu {
         skinDataUrl: this.settings.skinDataUrl,
         startFullscreen: this.settings.startFullscreen,
         interfaceSize: this.settings.interfaceSize,
+        language: this.settings.language,
       });
     });
 
@@ -698,6 +842,7 @@ export class StartMenu {
         skinDataUrl: this.settings.skinDataUrl,
         startFullscreen: this.settings.startFullscreen,
         interfaceSize: getNextInterfaceSize(this.settings.interfaceSize),
+        language: this.settings.language,
       };
       this.renderGraphicsView();
       this.handlers.onSettingsChange({
@@ -705,6 +850,7 @@ export class StartMenu {
         skinDataUrl: this.settings.skinDataUrl,
         startFullscreen: this.settings.startFullscreen,
         interfaceSize: this.settings.interfaceSize,
+        language: this.settings.language,
       });
     });
 
@@ -717,7 +863,7 @@ export class StartMenu {
     const backButton = document.createElement('button');
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
-    backButton.textContent = 'Back';
+    this.localizeText(backButton, 'back');
     backButton.addEventListener('click', () => this.showScreen('settings'));
     footer.append(backButton);
 
@@ -729,7 +875,7 @@ export class StartMenu {
     const view = document.createElement('section');
     view.className = 'menu-view menu-view-classic keybindings-view';
 
-    view.append(this.buildClassicTitle('Key Bindings'));
+    view.append(this.buildClassicTitle('keybindingsTitle'));
 
     const frame = document.createElement('div');
     frame.className = 'classic-screen-frame keybindings-screen-frame';
@@ -741,7 +887,9 @@ export class StartMenu {
       row.className = 'binding-row';
       const label = document.createElement('div');
       label.className = 'binding-label';
-      label.textContent = CONTROL_LABELS[action];
+      this.registerLocalized(() => {
+        label.textContent = getControlLabel(action, this.settings.language);
+      });
 
       const buttons = document.createElement('div');
       buttons.className = 'binding-buttons';
@@ -771,7 +919,7 @@ export class StartMenu {
     const resetButton = document.createElement('button');
     resetButton.type = 'button';
     resetButton.className = 'menu-button';
-    resetButton.textContent = 'Reset Defaults';
+    this.localizeText(resetButton, 'resetDefaults');
     resetButton.addEventListener('click', () => {
       const defaults = createDefaultSettings();
       this.settings = {
@@ -779,6 +927,7 @@ export class StartMenu {
         skinDataUrl: this.settings.skinDataUrl,
         startFullscreen: this.settings.startFullscreen,
         interfaceSize: this.settings.interfaceSize,
+        language: this.settings.language,
       };
       this.renderBindings();
       this.handlers.onSettingsChange({
@@ -786,13 +935,14 @@ export class StartMenu {
         skinDataUrl: this.settings.skinDataUrl,
         startFullscreen: this.settings.startFullscreen,
         interfaceSize: this.settings.interfaceSize,
+        language: this.settings.language,
       });
     });
 
     const backButton = document.createElement('button');
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
-    backButton.textContent = 'Back';
+    this.localizeText(backButton, 'back');
     backButton.addEventListener('click', () => this.showScreen('settings'));
 
     footer.append(resetButton, backButton);
@@ -804,7 +954,7 @@ export class StartMenu {
     const view = document.createElement('section');
     view.className = 'menu-view menu-view-classic stats-view';
 
-    view.append(this.buildClassicTitle('Statistiques globales'));
+    view.append(this.buildClassicTitle('statsTitle'));
 
     const frame = document.createElement('div');
     frame.className = 'classic-screen-frame stats-screen-frame';
@@ -815,7 +965,7 @@ export class StartMenu {
     const generalButton = document.createElement('button');
     generalButton.type = 'button';
     generalButton.className = 'menu-button classic-tab-button';
-    generalButton.textContent = 'General';
+    this.localizeText(generalButton, 'statsGeneralTab');
     generalButton.addEventListener('click', () => {
       this.selectedStatsCategory = 'general';
       this.renderStatsView();
@@ -825,7 +975,7 @@ export class StartMenu {
     const itemsButton = document.createElement('button');
     itemsButton.type = 'button';
     itemsButton.className = 'menu-button classic-tab-button';
-    itemsButton.textContent = 'Objets';
+    this.localizeText(itemsButton, 'statsItemsTab');
     itemsButton.addEventListener('click', () => {
       this.selectedStatsCategory = 'items';
       this.renderStatsView();
@@ -841,7 +991,7 @@ export class StartMenu {
     const backButton = document.createElement('button');
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
-    backButton.textContent = 'Back';
+    this.localizeText(backButton, 'back');
     backButton.addEventListener('click', () => this.showScreen('home'));
     footer.append(backButton);
 
@@ -861,12 +1011,12 @@ export class StartMenu {
     const actions = document.createElement('div');
     actions.className = 'title-actions';
     actions.append(
-      this.buildMainButton('Back to Game', () => {
+      this.buildMainButton('pauseBackToGame', () => {
         this.hide();
         this.handlers.onResume();
       }),
-      this.buildMainButton('Settings', () => this.showScreen('settings')),
-      this.buildMainButton('Quitter la partie', () => this.handlers.onQuitToTitle()),
+      this.buildMainButton('pauseSettings', () => this.showScreen('settings')),
+      this.buildMainButton('pauseQuit', () => this.handlers.onQuitToTitle()),
     );
 
     panel.append(this.pauseTitle, this.pauseMeta, this.pauseStats, actions);
@@ -878,7 +1028,7 @@ export class StartMenu {
     const view = document.createElement('section');
     view.className = 'menu-view wardrobe-view';
 
-    view.append(this.buildClassicTitle('Wardrobe'));
+    view.append(this.buildClassicTitle('wardrobeTitle'));
 
     const layout = document.createElement('div');
     layout.className = 'classic-layout wardrobe-layout';
@@ -896,6 +1046,7 @@ export class StartMenu {
     this.wardrobeCategoryList.className = 'wardrobe-category-list';
     this.wardrobeCategoryList.addEventListener('scroll', () => {
       this.wardrobeCategoryScrollTop = this.wardrobeCategoryList.scrollTop;
+      this.hydrateVisibleWardrobeCategoryPreviews();
     });
     categoryRail.append(this.wardrobeCategorySelect, this.wardrobeCategoryList);
 
@@ -925,6 +1076,7 @@ export class StartMenu {
       if (remaining <= 220) {
         void this.loadNextWardrobeGalleryChunk(this.wardrobeRenderRequestId);
       }
+      this.hydrateVisibleWardrobeCardPreviews();
     });
     this.wardrobeEmptyLabel.className = 'empty-worlds';
     galleryWell.append(this.wardrobeGalleryHeader, this.wardrobeGallery, this.wardrobeEmptyLabel);
@@ -937,7 +1089,7 @@ export class StartMenu {
     this.wardrobeSkinName.className = 'wardrobe-skin-name';
     this.wardrobeValidateButton.type = 'button';
     this.wardrobeValidateButton.className = 'menu-button wardrobe-validate-button';
-    this.wardrobeValidateButton.textContent = 'Valider';
+    this.localizeText(this.wardrobeValidateButton, 'validate');
     this.wardrobeValidateButton.addEventListener('click', () => this.applyWardrobePendingSelection());
     previewWell.append(stage, this.wardrobeSkinName, this.wardrobeValidateButton);
     layout.append(categoryRail, galleryWell, previewWell);
@@ -947,7 +1099,7 @@ export class StartMenu {
     const backButton = document.createElement('button');
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
-    backButton.textContent = 'Back';
+    this.localizeText(backButton, 'back');
     backButton.addEventListener('click', () => {
       this.discardWardrobePendingSelection();
       this.showScreen('home');
@@ -958,32 +1110,41 @@ export class StartMenu {
     return view;
   }
 
-  private buildClassicTitle(titleText: string, subtitleText?: string): HTMLElement {
+  private buildClassicTitle(titleKey: MenuMessageKey, subtitleKey?: MenuMessageKey): HTMLElement {
     const header = document.createElement('div');
     header.className = 'classic-screen-header';
 
-    const titleBitmap = createBitmapText(titleText, {
-      className: 'classic-screen-title classic-title-text',
-      uppercase: true,
-      ariaLabel: titleText,
-      glyphGapEm: 0.04,
+    const titleHost = document.createElement('div');
+    this.registerLocalized(() => {
+      const titleText = this.t(titleKey);
+      const titleBitmap = createBitmapText(titleText, {
+        className: 'classic-screen-title classic-title-text',
+        uppercase: true,
+        ariaLabel: titleText,
+        glyphGapEm: 0.04,
+      });
+      titleHost.replaceChildren(titleBitmap);
     });
+    header.append(titleHost);
 
-    header.append(titleBitmap);
-    if (subtitleText && subtitleText.trim().length > 0) {
+    if (subtitleKey) {
       const subtitle = document.createElement('p');
       subtitle.className = 'classic-screen-subtitle';
-      subtitle.textContent = subtitleText;
+      this.localizeText(subtitle, subtitleKey);
       header.append(subtitle);
     }
     return header;
   }
 
-  private buildMainButton(label: string, onClick: () => void, disabled = false): HTMLButtonElement {
+  private buildMainButton(
+    labelKey: MenuMessageKey,
+    onClick: () => void,
+    disabled = false,
+  ): HTMLButtonElement {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'menu-button menu-button-large';
-    button.textContent = label;
+    this.localizeText(button, labelKey);
     button.disabled = disabled;
     button.addEventListener('click', onClick);
     return button;
@@ -1005,6 +1166,7 @@ export class StartMenu {
     this.renderGraphicsView();
     this.renderPauseView();
     this.renderStatsView();
+    this.renderLanguageView();
     if (screen === 'wardrobe') {
       this.renderWardrobe();
     } else if (previousScreen === 'wardrobe') {
@@ -1014,6 +1176,7 @@ export class StartMenu {
     if (screen === 'home') {
       this.alignHomeToViewportCenter();
     }
+    this.updateMenuRenderActivity();
   }
 
   private applySurfaceForScreen(screen: MenuScreen): void {
@@ -1033,7 +1196,7 @@ export class StartMenu {
 
   private openCreateWorldScreen(): void {
     if (!this.createNameInput.value.trim()) {
-      this.createNameInput.value = 'New World';
+      this.createNameInput.value = this.t('worldNamePlaceholder');
     }
     this.showScreen('create-world');
   }
@@ -1058,7 +1221,7 @@ export class StartMenu {
     if (this.worlds.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'empty-worlds';
-      empty.textContent = 'Aucun monde.';
+      empty.textContent = this.t('emptyWorlds');
       this.worldList.append(empty);
     } else {
       this.worlds.forEach((world) => {
@@ -1082,9 +1245,9 @@ export class StartMenu {
         const title = document.createElement('strong');
         title.textContent = world.name;
         const created = document.createElement('span');
-        created.textContent = `Creation : ${this.formatDate(world.createdAt)}`;
+        created.textContent = this.tf('worldCreatedAt', { date: this.formatDate(world.createdAt) });
         const lastPlayed = document.createElement('span');
-        lastPlayed.textContent = `Derniere partie : ${this.formatDate(world.lastPlayedAt)}`;
+        lastPlayed.textContent = this.tf('worldLastPlayedAt', { date: this.formatDate(world.lastPlayedAt) });
         detail.append(title, created, lastPlayed);
 
         button.append(preview, detail);
@@ -1102,7 +1265,7 @@ export class StartMenu {
     const world = this.getSelectedWorld();
     if (!world) {
       this.editWorldPreview.style.backgroundImage = '';
-      this.editWorldTitle.textContent = 'Aucun monde selectionne';
+      this.editWorldTitle.textContent = this.t('noWorldSelected');
       this.editWorldMeta.textContent = '';
       this.editNameInput.value = '';
       this.saveEditWorldButton.disabled = true;
@@ -1112,7 +1275,7 @@ export class StartMenu {
     this.editWorldPreview.style.backgroundImage = `url("${this.getWorldPreviewUrl(world)}")`;
     this.editWorldTitle.textContent = world.name;
     this.editWorldMeta.textContent =
-      `Creation : ${this.formatDate(world.createdAt)} | Derniere partie : ${this.formatDate(world.lastPlayedAt)}`;
+      `${this.tf('worldCreatedAt', { date: this.formatDate(world.createdAt) })} | ${this.tf('worldLastPlayedAt', { date: this.formatDate(world.lastPlayedAt) })}`;
     if (document.activeElement !== this.editNameInput || this.editNameInput.dataset.worldId !== world.id) {
       this.editNameInput.value = world.name;
       this.editNameInput.dataset.worldId = world.id;
@@ -1128,16 +1291,16 @@ export class StartMenu {
     const entries: Array<[string, string]> =
       this.selectedStatsCategory === 'general'
         ? [
-            ['Temps de jeu', this.formatDuration(this.globalStats.totalPlayTimeMs)],
-            ['Distance parcourue', `${Math.round(this.globalStats.totalDistanceTravelled).toLocaleString()} m`],
-            ['Sauts', this.globalStats.totalJumps.toLocaleString()],
-            ['Mondes crees', this.globalStats.worldsCreated.toLocaleString()],
+            [this.t('playTime'), this.formatDuration(this.globalStats.totalPlayTimeMs)],
+            [this.t('distanceTravelled'), `${Math.round(this.globalStats.totalDistanceTravelled).toLocaleString()} m`],
+            [this.t('jumps'), this.globalStats.totalJumps.toLocaleString()],
+            [this.t('worldsCreated'), this.globalStats.worldsCreated.toLocaleString()],
           ]
         : [
-            ['Blocs casses', this.globalStats.totalBlocksMined.toLocaleString()],
-            ['Blocs poses', this.globalStats.totalBlocksPlaced.toLocaleString()],
-            ['Objets craftes', this.globalStats.totalCraftedItems.toLocaleString()],
-            ['Mondes sauvegardes', this.worlds.length.toLocaleString()],
+            [this.t('blocksMined'), this.globalStats.totalBlocksMined.toLocaleString()],
+            [this.t('blocksPlaced'), this.globalStats.totalBlocksPlaced.toLocaleString()],
+            [this.t('craftedItems'), this.globalStats.totalCraftedItems.toLocaleString()],
+            [this.t('worldsSaved'), this.worlds.length.toLocaleString()],
           ];
 
     this.statsList.replaceChildren(...this.buildStatsRows(entries));
@@ -1146,29 +1309,35 @@ export class StartMenu {
   private renderPauseView(): void {
     const snapshot = this.pauseWorld ?? {
       id: 'none',
-      name: 'Game Paused',
-      seed: 'N/A',
+      name: this.t('pauseDefaultWorldName'),
+      seed: this.t('pauseNotAvailable'),
       worldStats: createEmptyWorldStats(),
     };
 
     this.pauseTitle.textContent = snapshot.name;
-    this.pauseMeta.textContent = `Seed ${snapshot.seed}`;
+    this.pauseMeta.textContent = this.tf('pauseSeed', { seed: snapshot.seed });
     this.pauseStats.replaceChildren(
       ...this.buildDefinitionListEntries([
-        ['Play Time', this.formatDuration(snapshot.worldStats.playTimeMs)],
-        ['Blocks Mined', snapshot.worldStats.blocksMined.toLocaleString()],
-        ['Blocks Placed', snapshot.worldStats.blocksPlaced.toLocaleString()],
-        ['Distance', `${Math.round(snapshot.worldStats.distanceTravelled).toLocaleString()} m`],
+        [this.t('playTime'), this.formatDuration(snapshot.worldStats.playTimeMs)],
+        [this.t('pauseBlocksMined'), snapshot.worldStats.blocksMined.toLocaleString()],
+        [this.t('pauseBlocksPlaced'), snapshot.worldStats.blocksPlaced.toLocaleString()],
+        [this.t('pauseDistance'), `${Math.round(snapshot.worldStats.distanceTravelled).toLocaleString()} m`],
       ]),
     );
   }
 
   private renderGraphicsView(): void {
-    this.startupFullscreenToggleButton.textContent = `Plein ecran : ${
-      this.settings.startFullscreen ? 'ON' : 'OFF'
+    this.startupFullscreenToggleButton.textContent = `${this.t('fullscreen')}: ${
+      this.settings.startFullscreen ? this.t('stateOn') : this.t('stateOff')
     }`;
     const zoom = getInterfaceZoomPercent(this.settings.interfaceSize);
-    this.interfaceSizeToggleButton.textContent = `Taille interface : ${this.settings.interfaceSize} (${zoom}%)`;
+    this.interfaceSizeToggleButton.textContent = `${this.t('interfaceSize')}: ${this.settings.interfaceSize} (${zoom}%)`;
+  }
+
+  private renderLanguageView(): void {
+    this.languageButtons.forEach((button, language) => {
+      button.classList.toggle('active', language === this.settings.language);
+    });
   }
 
   private renderWardrobe(): void {
@@ -1210,7 +1379,6 @@ export class StartMenu {
   }
 
   private renderWardrobeCategoryRail(categories: CatalogCategory[]): void {
-    const categoryRenderRequestId = ++this.wardrobeCategoryRenderRequestId;
     const previousScrollTop = this.wardrobeCategoryScrollTop;
 
     this.disposeWardrobeCategoryPreviews();
@@ -1229,22 +1397,26 @@ export class StartMenu {
       stage.className = 'wardrobe-category-stage';
       const previewSkin = category.skins[0] ?? null;
       if (previewSkin) {
-        const viewer = new SkinViewer(stage, null, { animated: false });
-        this.wardrobeCategoryViewers.push(viewer);
+        stage.classList.add('loading-3d');
+        stage.append(this.createWardrobe3dLoadingPlaceholder());
         void loadCatalogSkinUrl(previewSkin).then((url) => {
           if (!url) {
             return;
           }
-          if (
-            categoryRenderRequestId !== this.wardrobeCategoryRenderRequestId ||
-            this.currentScreen !== 'wardrobe'
-          ) {
+          if (this.currentScreen !== 'wardrobe' || !stage.isConnected) {
             return;
           }
-          void viewer.setSkin(url);
+          stage.dataset.skinUrl = url;
+          const observer = this.ensureWardrobeCategoryObserver();
+          observer.observe(stage);
+          this.hydrateVisibleWardrobeCategoryPreviews();
         });
       } else {
         stage.classList.add('empty');
+        const stageLabel = document.createElement('span');
+        stageLabel.className = 'wardrobe-category-stage-label';
+        stageLabel.textContent = category.name.slice(0, 1).toUpperCase();
+        stage.append(stageLabel);
       }
 
       const label = document.createElement('span');
@@ -1260,12 +1432,13 @@ export class StartMenu {
     importIcon.className = 'wardrobe-import-plus';
     importIcon.textContent = '+';
     const importLabel = document.createElement('span');
-    importLabel.textContent = 'Import';
+    importLabel.textContent = this.t('import');
     importTile.append(importIcon, importLabel, this.wardrobeImportInput);
     this.wardrobeCategoryList.append(importTile);
 
     requestAnimationFrame(() => {
       this.wardrobeCategoryList.scrollTop = previousScrollTop;
+      this.hydrateVisibleWardrobeCategoryPreviews();
     });
   }
 
@@ -1275,7 +1448,7 @@ export class StartMenu {
     if (categories.length === 0) {
       const option = document.createElement('option');
       option.value = '';
-      option.textContent = 'Aucune categorie';
+      option.textContent = this.t('noCategory');
       this.wardrobeCategorySelect.append(option);
       this.wardrobeCategorySelect.disabled = true;
       this.wardrobeCategorySelect.value = '';
@@ -1314,7 +1487,8 @@ export class StartMenu {
   }
 
   private renderWardrobeFilterBar(category: CatalogCategory | null, categoryCount: number): void {
-    this.wardrobeCategoryTitle.textContent = category ? category.name : categoryCount === 0 ? 'Aucune categorie' : '';
+    this.wardrobeCategoryTitle.textContent =
+      category ? category.name : categoryCount === 0 ? this.t('noCategory') : '';
     this.wardrobeFilterButtons.clear();
     this.wardrobeFilterBar.replaceChildren();
 
@@ -1326,9 +1500,9 @@ export class StartMenu {
 
     this.wardrobeFilterBar.style.display = 'flex';
     const filters: Array<{ value: WardrobeGenderFilter; label: string }> = [
-      { value: 'all', label: 'ALL' },
-      { value: 'male', label: 'MALE' },
-      { value: 'female', label: 'FEMALE' },
+      { value: 'all', label: this.t('all') },
+      { value: 'male', label: this.t('male') },
+      { value: 'female', label: this.t('female') },
     ];
 
     filters.forEach((entry) => {
@@ -1362,6 +1536,13 @@ export class StartMenu {
     this.wardrobeFilterButtons.forEach((button, filter) => {
       button.classList.toggle('active', filter === this.wardrobeGenderFilter);
     });
+  }
+
+  private createWardrobe3dLoadingPlaceholder(): HTMLElement {
+    const loading = document.createElement('span');
+    loading.className = 'wardrobe-3d-loading';
+    loading.setAttribute('aria-hidden', 'true');
+    return loading;
   }
 
   private filterWardrobeSkins(skins: CatalogSkin[]): CatalogSkin[] {
@@ -1399,14 +1580,15 @@ export class StartMenu {
 
     if (!selectedCategory) {
       this.wardrobeEmptyLabel.style.display = '';
-      this.wardrobeEmptyLabel.textContent = categoryCount === 0 ? 'Aucune categorie.' : 'Aucun skin.';
+      this.wardrobeEmptyLabel.textContent =
+        categoryCount === 0 ? this.t('noCategoryDot') : this.t('noSkinDot');
       return;
     }
 
     const skins = this.filterWardrobeSkins(getCatalogSkins(selectedCategory.name));
     if (skins.length === 0) {
       this.wardrobeEmptyLabel.style.display = '';
-      this.wardrobeEmptyLabel.textContent = 'Aucun skin.';
+      this.wardrobeEmptyLabel.textContent = this.t('noSkinDot');
       return;
     }
 
@@ -1516,8 +1698,10 @@ export class StartMenu {
         button.addEventListener('click', () => this.selectCatalogSkin(skin, url));
 
         const preview = document.createElement('div');
-        preview.className = 'wardrobe-skin-preview-3d';
+        preview.className = 'wardrobe-skin-preview-3d loading-3d';
         preview.dataset.skinUrl = url;
+        preview.dataset.skinName = skin.name;
+        preview.append(this.createWardrobe3dLoadingPlaceholder());
         observer.observe(preview);
 
         const label = document.createElement('span');
@@ -1539,6 +1723,7 @@ export class StartMenu {
 
       this.wardrobeGalleryNextIndex = end;
       this.highlightSelectedWardrobeCard();
+      this.hydrateVisibleWardrobeCardPreviews();
 
       if (end >= total) {
         if (this.wardrobeGalleryLoadObserver) {
@@ -1585,37 +1770,61 @@ export class StartMenu {
             this.disposeWardrobeCardViewer(host);
             return;
           }
-
-          if (this.wardrobeCardViewers.has(host)) {
-            return;
-          }
-
-          const skinUrl = host.dataset.skinUrl;
-          if (!skinUrl) {
-            return;
-          }
-
-          const viewer = new SkinViewer(host, skinUrl, { animated: false });
-          this.wardrobeCardViewers.set(host, viewer);
+          this.mountWardrobeCardViewer(host);
         });
       },
       {
         root: this.wardrobeGallery,
-        rootMargin: '40px 0px',
-        threshold: 0.05,
+        rootMargin: '24px 0px',
+        threshold: 0.1,
       },
     );
 
     return this.wardrobeCardObserver;
   }
 
-  private disposeWardrobeCardViewer(host: HTMLElement): void {
+  private mountWardrobeCardViewer(host: HTMLElement): void {
+    if (this.wardrobeCardViewers.has(host)) {
+      return;
+    }
+    const skinUrl = host.dataset.skinUrl;
+    if (!skinUrl) {
+      return;
+    }
+    try {
+      const viewer = new SkinViewer(host, skinUrl, { animated: false });
+      this.wardrobeCardViewers.set(host, viewer);
+      host.classList.add('has-3d');
+      host.classList.remove('loading-3d');
+    } catch {
+      host.classList.remove('has-3d');
+      host.classList.add('loading-3d');
+    }
+  }
+
+  private isWardrobePreviewVisible(host: HTMLElement): boolean {
+    const hostRect = host.getBoundingClientRect();
+    const rootRect = this.wardrobeGallery.getBoundingClientRect();
+    return (
+      hostRect.bottom > rootRect.top - 40 &&
+      hostRect.top < rootRect.bottom + 40 &&
+      hostRect.right > rootRect.left &&
+      hostRect.left < rootRect.right
+    );
+  }
+
+  private disposeWardrobeCardViewer(host: HTMLElement, hydrateAfter = true): void {
     const viewer = this.wardrobeCardViewers.get(host);
     if (!viewer) {
       return;
     }
     viewer.dispose();
+    host.classList.remove('has-3d');
+    host.classList.add('loading-3d');
     this.wardrobeCardViewers.delete(host);
+    if (hydrateAfter) {
+      this.hydrateVisibleWardrobeCardPreviews();
+    }
   }
 
   private disposeWardrobeCardPreviews(): void {
@@ -1623,16 +1832,119 @@ export class StartMenu {
       this.wardrobeCardObserver.disconnect();
       this.wardrobeCardObserver = null;
     }
-    this.wardrobeCardViewers.forEach((viewer) => viewer.dispose());
+    this.wardrobeCardViewers.forEach((viewer, host) => {
+      viewer.dispose();
+      host.classList.remove('has-3d');
+      host.classList.add('loading-3d');
+    });
     this.wardrobeCardViewers.clear();
   }
 
-  private disposeWardrobeCategoryPreviews(): void {
-    while (this.wardrobeCategoryViewers.length > 0) {
-      const viewer = this.wardrobeCategoryViewers.pop();
-      if (viewer) {
-        viewer.dispose();
+  private hydrateVisibleWardrobeCardPreviews(): void {
+    if (this.currentScreen !== 'wardrobe') {
+      return;
+    }
+
+    const hosts = this.wardrobeGallery.querySelectorAll<HTMLElement>('.wardrobe-skin-preview-3d');
+    for (const host of hosts) {
+      if (this.wardrobeCardViewers.has(host) || !this.isWardrobePreviewVisible(host)) {
+        continue;
       }
+      this.mountWardrobeCardViewer(host);
+    }
+  }
+
+  private ensureWardrobeCategoryObserver(): IntersectionObserver {
+    if (this.wardrobeCategoryObserver) {
+      return this.wardrobeCategoryObserver;
+    }
+
+    this.wardrobeCategoryObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const host = entry.target as HTMLElement;
+          if (!entry.isIntersecting) {
+            this.disposeWardrobeCategoryViewer(host);
+            return;
+          }
+          this.mountWardrobeCategoryViewer(host);
+        });
+      },
+      {
+        root: this.wardrobeCategoryList,
+        rootMargin: '32px 0px',
+        threshold: 0.1,
+      },
+    );
+
+    return this.wardrobeCategoryObserver;
+  }
+
+  private mountWardrobeCategoryViewer(host: HTMLElement): void {
+    if (this.wardrobeCategoryViewers.has(host)) {
+      return;
+    }
+    const skinUrl = host.dataset.skinUrl;
+    if (!skinUrl) {
+      return;
+    }
+    try {
+      const viewer = new SkinViewer(host, skinUrl, { animated: false });
+      this.wardrobeCategoryViewers.set(host, viewer);
+      host.classList.add('has-3d');
+      host.classList.remove('loading-3d');
+    } catch {
+      host.classList.remove('has-3d');
+      host.classList.add('loading-3d');
+    }
+  }
+
+  private isWardrobeCategoryPreviewVisible(host: HTMLElement): boolean {
+    const hostRect = host.getBoundingClientRect();
+    const rootRect = this.wardrobeCategoryList.getBoundingClientRect();
+    return (
+      hostRect.bottom > rootRect.top - 40 &&
+      hostRect.top < rootRect.bottom + 40 &&
+      hostRect.right > rootRect.left &&
+      hostRect.left < rootRect.right
+    );
+  }
+
+  private disposeWardrobeCategoryViewer(host: HTMLElement): void {
+    const viewer = this.wardrobeCategoryViewers.get(host);
+    if (!viewer) {
+      return;
+    }
+    viewer.dispose();
+    host.classList.remove('has-3d');
+    host.classList.add('loading-3d');
+    this.wardrobeCategoryViewers.delete(host);
+  }
+
+  private disposeWardrobeCategoryPreviews(): void {
+    if (this.wardrobeCategoryObserver) {
+      this.wardrobeCategoryObserver.disconnect();
+      this.wardrobeCategoryObserver = null;
+    }
+    this.wardrobeCategoryViewers.forEach((viewer, host) => {
+      viewer.dispose();
+      host.classList.remove('has-3d');
+      host.classList.add('loading-3d');
+    });
+    this.wardrobeCategoryViewers.clear();
+  }
+
+  private hydrateVisibleWardrobeCategoryPreviews(): void {
+    if (this.currentScreen !== 'wardrobe') {
+      return;
+    }
+
+    const hosts = this.wardrobeCategoryList.querySelectorAll<HTMLElement>('.wardrobe-category-stage[data-skin-url]');
+    for (const host of hosts) {
+      if (this.wardrobeCategoryViewers.has(host) || !this.isWardrobeCategoryPreviewVisible(host)) {
+        continue;
+      }
+      this.mountWardrobeCategoryViewer(host);
     }
   }
 
@@ -1649,7 +1961,7 @@ export class StartMenu {
   private resolveCommittedWardrobeSkinName(): string {
     const selectedUrl = this.settings.skinDataUrl;
     if (!selectedUrl) {
-      return 'Default Skin';
+      return this.t('defaultSkin');
     }
     if (this.selectedSkinName) {
       return this.selectedSkinName;
@@ -1663,14 +1975,14 @@ export class StartMenu {
       this.selectedSkinName = this.importedSkinName;
       return this.importedSkinName;
     }
-    return 'Imported Skin';
+    return this.t('importedSkin');
   }
 
   private resolvePendingWardrobeSkinName(): string {
     const selectedUrl = this.wardrobePendingSkinUrl;
     if (!selectedUrl) {
-      this.wardrobePendingSkinName = 'Default Skin';
-      return 'Default Skin';
+      this.wardrobePendingSkinName = this.t('defaultSkin');
+      return this.t('defaultSkin');
     }
     if (this.wardrobePendingSkinName) {
       return this.wardrobePendingSkinName;
@@ -1684,8 +1996,8 @@ export class StartMenu {
       this.wardrobePendingSkinName = this.wardrobePendingImportedSkinName;
       return this.wardrobePendingImportedSkinName;
     }
-    this.wardrobePendingSkinName = 'Imported Skin';
-    return 'Imported Skin';
+    this.wardrobePendingSkinName = this.t('importedSkin');
+    return this.t('importedSkin');
   }
 
   private formatWardrobeSkinName(name: string): string {
@@ -1711,7 +2023,7 @@ export class StartMenu {
     this.selectedSkinUrl = selectedUrl;
 
     if (!selectedUrl) {
-      this.selectedSkinName = 'Default Skin';
+      this.selectedSkinName = this.t('defaultSkin');
       return;
     }
 
@@ -1726,7 +2038,7 @@ export class StartMenu {
     if (this.importedSkinName) {
       this.selectedSkinName = this.importedSkinName;
     } else {
-      this.selectedSkinName = 'Imported Skin';
+      this.selectedSkinName = this.t('importedSkin');
     }
   }
 
@@ -1811,7 +2123,6 @@ export class StartMenu {
   }
 
   private cleanupWardrobeView(): void {
-    this.wardrobeCategoryRenderRequestId += 1;
     this.wardrobeRenderRequestId += 1;
     this.disposeWardrobeCategoryPreviews();
     this.disposeWardrobeCardPreviews();
@@ -1842,19 +2153,21 @@ export class StartMenu {
     this.selectedSkinUrl = skinDataUrl;
     if (!skinDataUrl) {
       this.importedSkinName = null;
-      this.selectedSkinName = 'Default Skin';
+      this.selectedSkinName = this.t('defaultSkin');
     }
     this.settings = {
       keyBindings: cloneBindings(this.settings.keyBindings),
       skinDataUrl,
       startFullscreen: this.settings.startFullscreen,
       interfaceSize: this.settings.interfaceSize,
+      language: this.settings.language,
     };
     this.handlers.onSettingsChange({
       keyBindings: cloneBindings(this.settings.keyBindings),
       skinDataUrl,
       startFullscreen: this.settings.startFullscreen,
       interfaceSize: this.settings.interfaceSize,
+      language: this.settings.language,
     });
   }
 
@@ -1890,6 +2203,7 @@ export class StartMenu {
       skinDataUrl: this.settings.skinDataUrl,
       startFullscreen: this.settings.startFullscreen,
       interfaceSize: this.settings.interfaceSize,
+      language: this.settings.language,
     });
   }
 
@@ -1903,7 +2217,9 @@ export class StartMenu {
         const binding = this.settings.keyBindings[action][slot];
         const isListening =
           this.listeningBinding?.action === action && this.listeningBinding.slot === slot;
-        button.textContent = isListening ? 'Press key...' : formatKeyCode(binding);
+        button.textContent = isListening
+          ? this.t('pressKey')
+          : formatKeyCode(binding, this.settings.language);
         button.classList.toggle('listening', isListening);
       });
     });
@@ -2046,7 +2362,8 @@ export class StartMenu {
     if (Number.isNaN(date.getTime())) {
       return value;
     }
-    return new Intl.DateTimeFormat('fr-FR', {
+    const locale = this.settings.language === 'fr' ? 'fr-FR' : 'en-US';
+    return new Intl.DateTimeFormat(locale, {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',

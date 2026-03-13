@@ -1,3 +1,6 @@
+import { DEFAULT_UI_LANGUAGE, translate, type UiLanguage } from '../i18n/Language';
+import { isSpecialKeyCode } from '../i18n/messages';
+
 export const CONTROL_ACTIONS = [
   'moveForward',
   'moveBackward',
@@ -25,24 +28,18 @@ export interface GameSettings {
   skinDataUrl: string | null;
   startFullscreen: boolean;
   interfaceSize: number;
+  language: UiLanguage;
 }
 
 export const DEFAULT_INTERFACE_SIZE = 5;
 export const MIN_INTERFACE_SIZE = 1;
 export const MAX_INTERFACE_SIZE = 8;
+const DEFAULT_SKIN_URL = new URL('../../assets/skins/boys default/colin.png', import.meta.url).href;
 
-export const CONTROL_LABELS: Record<ControlAction, string> = {
-  moveForward: 'Move Forward',
-  moveBackward: 'Move Backward',
-  moveLeft: 'Strafe Left',
-  moveRight: 'Strafe Right',
-  jump: 'Jump',
-  crouch: 'Crouch',
-  sprint: 'Sprint',
-  inventory: 'Inventory',
-  debug: 'Debug Overlay',
-  pause: 'Pause Menu',
-};
+export const getControlLabel = (
+  action: ControlAction,
+  language: UiLanguage = DEFAULT_UI_LANGUAGE,
+): string => translate(`controls.actions.${action}`, {}, language);
 
 export const DEFAULT_KEY_BINDINGS: KeyBindings = {
   moveForward: { primary: 'KeyW', secondary: 'ArrowUp' },
@@ -59,9 +56,10 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
 
 export const createDefaultSettings = (): GameSettings => ({
   keyBindings: structuredClone(DEFAULT_KEY_BINDINGS),
-  skinDataUrl: null,
+  skinDataUrl: DEFAULT_SKIN_URL,
   startFullscreen: true,
   interfaceSize: DEFAULT_INTERFACE_SIZE,
+  language: DEFAULT_UI_LANGUAGE,
 });
 
 export const normalizeInterfaceSize = (value: number): number => {
@@ -99,37 +97,15 @@ export const cloneBindings = (bindings: KeyBindings): KeyBindings => {
   return clone;
 };
 
-const SPECIAL_LABELS: Record<string, string> = {
-  Escape: 'Esc',
-  Space: 'Space',
-  ControlLeft: 'Ctrl Left',
-  ControlRight: 'Ctrl Right',
-  ShiftLeft: 'Shift Left',
-  ShiftRight: 'Shift Right',
-  AltLeft: 'Alt Left',
-  AltRight: 'Alt Right',
-  ArrowUp: 'Arrow Up',
-  ArrowDown: 'Arrow Down',
-  ArrowLeft: 'Arrow Left',
-  ArrowRight: 'Arrow Right',
-  Numpad0: 'Num 0',
-  Numpad1: 'Num 1',
-  Numpad2: 'Num 2',
-  Numpad3: 'Num 3',
-  Numpad4: 'Num 4',
-  Numpad5: 'Num 5',
-  Numpad6: 'Num 6',
-  Numpad7: 'Num 7',
-  Numpad8: 'Num 8',
-  Numpad9: 'Num 9',
-};
-
-export const formatKeyCode = (code: string | null): string => {
+export const formatKeyCode = (
+  code: string | null,
+  language: UiLanguage = DEFAULT_UI_LANGUAGE,
+): string => {
   if (!code) {
-    return 'Unbound';
+    return translate('controls.unbound', {}, language);
   }
-  if (SPECIAL_LABELS[code]) {
-    return SPECIAL_LABELS[code];
+  if (isSpecialKeyCode(code)) {
+    return translate(`controls.specialKeys.${code}`, {}, language);
   }
   if (code.startsWith('Key')) {
     return code.replace('Key', '').toUpperCase();
@@ -138,7 +114,7 @@ export const formatKeyCode = (code: string | null): string => {
     return code.replace('Digit', '');
   }
   if (code.startsWith('Mouse')) {
-    return code.replace('Mouse', 'Mouse ');
+    return code.replace('Mouse', language === 'fr' ? 'Souris ' : 'Mouse ');
   }
   return code;
 };

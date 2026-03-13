@@ -1,4 +1,5 @@
 import { CONTROL_ACTIONS, MAX_INTERFACE_SIZE, MIN_INTERFACE_SIZE } from '../game/Controls';
+import { isUiLanguage } from '../i18n/Language';
 import type {
   ChunkDiffRecord,
   StoredAppMeta,
@@ -197,7 +198,8 @@ export const isStoredSettings = (value: unknown): value is StoredSettings => {
     hasAllBindings &&
     isStringOrNull(candidate.skinDataUrl) &&
     (typeof candidate.startFullscreen === 'boolean' || typeof candidate.startFullscreen === 'undefined') &&
-    (typeof candidate.interfaceSize === 'undefined' || isInterfaceSize(candidate.interfaceSize))
+    (typeof candidate.interfaceSize === 'undefined' || isInterfaceSize(candidate.interfaceSize)) &&
+    (typeof candidate.language === 'undefined' || isUiLanguage(candidate.language))
   );
 };
 

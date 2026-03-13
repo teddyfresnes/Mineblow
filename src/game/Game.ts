@@ -30,6 +30,7 @@ import {
 } from '../types/save';
 import type { VoxelHit } from '../types/world';
 import { debounce } from '../utils/debounce';
+import { setCurrentLanguage } from '../i18n/Language';
 import { DebugOverlay } from '../ui/DebugOverlay';
 import { Hud } from '../ui/Hud';
 import {
@@ -75,7 +76,7 @@ const PRIMARY_MINING_HOLD_MS = 120;
 const PRIMARY_PUNCH_LOCK_MS = 0;
 const MENU_MUSIC_URL = new URL('../../assets/sounds/menu/menu.mp3', import.meta.url).href;
 const INTRO_SPLASH_DURATION_MS = 4600;
-const INTRO_SPLASH_BEFORE_MENU_MS = 700;
+const INTRO_SPLASH_MIN_VISIBLE_MS = 3000;
 const WORLD_PREVIEW_CAPTURE_DELAY_FRAMES = 16;
 const WORLD_PREVIEW_SIZE = 256;
 
@@ -85,6 +86,8 @@ export class Game {
   private readonly entryGate = document.createElement('div');
   private readonly entryGateButton = document.createElement('button');
   private readonly introSplash = document.createElement('div');
+  private readonly introSplashLabel = document.createElement('div');
+  private readonly introSplashLoader = document.createElement('div');
   private readonly renderer: Renderer;
   private readonly input: InputController;
   private readonly menu: StartMenu;
@@ -138,7 +141,11 @@ export class Game {
     this.entryGateButton.textContent = 'Cliquez pour acceder a Mineblow';
     this.entryGateButton.disabled = true;
     this.introSplash.className = 'intro-splash';
-    this.introSplash.textContent = 'made by teddyfresnes';
+    this.introSplashLabel.className = 'intro-splash-label';
+    this.introSplashLabel.textContent = 'made by teddyfresnes';
+    this.introSplashLoader.className = 'intro-splash-loader';
+    this.introSplashLoader.setAttribute('aria-hidden', 'true');
+    this.introSplash.append(this.introSplashLabel, this.introSplashLoader);
     this.shell.append(this.canvas);
     const entryGateBody = document.createElement('div');
     entryGateBody.className = 'entry-gate-body';
@@ -174,6 +181,7 @@ export class Game {
           skinDataUrl,
           startFullscreen: this.settings.startFullscreen,
           interfaceSize: this.settings.interfaceSize,
+          language: this.settings.language,
         });
       },
     });
@@ -205,6 +213,9 @@ export class Game {
     this.handleResize = this.handleResize.bind(this);
     this.handleBeforeUnload = this.handleBeforeUnload.bind(this);
     this.handlePointerLockChange = this.handlePointerLockChange.bind(this);
+    setCurrentLanguage(this.settings.language);
+    this.hud.setLanguage(this.settings.language);
+    this.inventoryScreen.setLanguage(this.settings.language);
   }
 
   async bootstrap(): Promise<void> {
@@ -223,12 +234,15 @@ export class Game {
     ]);
 
     this.settings = settings;
+    setCurrentLanguage(this.settings.language);
     this.applyInterfaceZoom(this.settings.interfaceSize);
     this.globalStats = globalStats;
     this.menu.setSettings(settings);
     this.menu.setGlobalStats(globalStats);
     this.menu.setWorlds(worlds);
     this.hud.setHandSkin(settings.skinDataUrl);
+    this.hud.setLanguage(this.settings.language);
+    this.inventoryScreen.setLanguage(this.settings.language);
     this.entryGateReady = true;
     this.entryGateButton.disabled = false;
     if (this.entryGateActivated) {
@@ -1264,10 +1278,14 @@ export class Game {
       skinDataUrl: settings.skinDataUrl,
       startFullscreen: settings.startFullscreen,
       interfaceSize: normalizeInterfaceSize(settings.interfaceSize),
+      language: settings.language,
     };
+    setCurrentLanguage(this.settings.language);
     this.applyInterfaceZoom(this.settings.interfaceSize);
     this.menu.setSettings(this.settings);
     this.hud.setHandSkin(this.settings.skinDataUrl);
+    this.hud.setLanguage(this.settings.language);
+    this.inventoryScreen.setLanguage(this.settings.language);
     this.renderer.setPlayerSkin(this.settings.skinDataUrl);
     void this.saveRepository.saveSettings(this.settings);
     if (this.inventoryScreen.isVisible()) {
@@ -1471,7 +1489,7 @@ export class Game {
       this.entryGateDelayElapsed = true;
       this.entryGateDelayTimeoutId = null;
       this.finishEntryGate();
-    }, INTRO_SPLASH_BEFORE_MENU_MS);
+    }, INTRO_SPLASH_MIN_VISIBLE_MS);
     void this.playMenuMusic();
     this.finishEntryGate();
   }

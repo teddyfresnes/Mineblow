@@ -1867,6 +1867,14 @@
   height: 92px;
   border: 2px solid rgba(255, 255, 255, 0.22);
   background: rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+}
+
+.wardrobe-category-stage .paperdoll-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  transform: translateX(1px);
 }
 
 .wardrobe-category-stage-label {
@@ -2030,10 +2038,27 @@
 .wardrobe-skin-preview-3d {
   width: 100%;
   height: 100%;
+  display: grid;
+  place-items: center;
   min-height: 0;
   overflow: hidden;
   border: 2px solid rgba(255, 255, 255, 0.24);
   background-color: rgba(0, 0, 0, 0.4);
+}
+
+.wardrobe-3d-loading {
+  width: 26px;
+  height: 26px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #f8d774;
+  border-radius: 50%;
+  animation: wardrobe-spin 0.8s linear infinite;
+}
+
+.wardrobe-skin-preview-3d.has-3d .wardrobe-3d-loading,
+.wardrobe-category-stage.has-3d .wardrobe-3d-loading,
+.wardrobe-category-stage.has-3d .wardrobe-category-stage-label {
+  display: none;
 }
 
 .wardrobe-skin-preview-3d .paperdoll-canvas {
@@ -2071,8 +2096,11 @@
   position: absolute;
   inset: 0;
   z-index: 45;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
   background: #000;
   color: #fff;
   font-size: clamp(1.4rem, 3.6vw, 3rem);
@@ -2084,10 +2112,41 @@
   visibility: hidden;
 }
 
+.intro-splash-label {
+  line-height: 1.2;
+}
+
+.intro-splash-loader {
+  width: min(260px, 58vw);
+  height: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.intro-splash-loader::before {
+  content: '';
+  display: block;
+  width: 35%;
+  height: 100%;
+  background: linear-gradient(90deg, #f4e7a1, #ffffff);
+  animation: intro-loader 1s linear infinite;
+}
+
 .intro-splash.active {
   visibility: visible;
   pointer-events: auto;
   animation: intro-splash 4.6s ease forwards;
+}
+
+@keyframes intro-loader {
+  0% {
+    transform: translateX(-110%);
+  }
+
+  100% {
+    transform: translateX(310%);
+  }
 }
 
 @keyframes intro-splash {
@@ -2195,25 +2254,45 @@
 }
 
 .settings-view .classic-button-stack {
-  width: min(360px, 100%);
+  width: min(920px, 100%);
+  gap: 6px;
 }
 
 .settings-compact-button {
-  width: min(320px, 100%);
-  min-height: 42px;
-  justify-self: center;
-  padding: 8px 14px;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  justify-self: stretch;
+  padding: 0 14px;
   font-size: 0.92rem;
+  line-height: 1;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
 
 .settings-buttons-grid {
-  width: min(740px, 100%);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(920px, 100%);
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
   align-items: start;
+  row-gap: 6px;
+  column-gap: 12px;
+}
+
+.settings-language-button {
+  grid-column: 1 / -1;
 }
 
 .graphics-options-stack {
-  width: min(360px, 100%);
+  width: min(620px, 100%);
+  gap: 6px;
+}
+
+.languages-view .graphics-options-stack {
+  width: min(520px, 100%);
 }
 
 .graphics-view {
@@ -2343,7 +2422,11 @@
 
   .settings-buttons-grid {
     grid-template-columns: 1fr;
-    width: min(360px, 100%);
+    width: min(560px, 100%);
+  }
+
+  .settings-language-button {
+    grid-column: auto;
   }
 }
 

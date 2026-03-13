@@ -6,6 +6,7 @@ import {
   normalizeInterfaceSize,
   type GameSettings,
 } from '../game/Controls';
+import { DEFAULT_UI_LANGUAGE } from '../i18n/Language';
 import type { InventorySlot, PlayerState } from '../types/player';
 import {
   createEmptyGlobalStats,
@@ -205,7 +206,7 @@ export class SaveRepository {
     const db = await this.getDb();
     const now = new Date().toISOString();
     const worldId = await this.createUniqueWorldId(name);
-    const worldName = name.trim() || `New World ${new Date().toLocaleDateString('en-CA')}`;
+    const worldName = name.trim() || `Nouveau monde ${new Date().toLocaleDateString('fr-CA')}`;
     const save: WorldSave = {
       schemaVersion: SAVE_CONFIG.schemaVersion,
       id: worldId,
@@ -408,6 +409,7 @@ export class SaveRepository {
         skinDataUrl: settings.skinDataUrl,
         startFullscreen: settings.startFullscreen ?? true,
         interfaceSize: normalizeInterfaceSize(settings.interfaceSize ?? DEFAULT_INTERFACE_SIZE),
+        language: settings.language ?? DEFAULT_UI_LANGUAGE,
       };
     }
 

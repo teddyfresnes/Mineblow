@@ -1,5 +1,6 @@
 import type { InventorySlot } from '../types/player';
 import { getUiBlockColor } from '../world/BlockRegistry';
+import { DEFAULT_UI_LANGUAGE, translate, type UiLanguage } from '../i18n/Language';
 
 export class Hud {
   private readonly root = document.createElement('div');
@@ -12,13 +13,14 @@ export class Hud {
   private readonly levelLabel = document.createElement('div');
   private readonly hotbar = document.createElement('div');
   private readonly slotElements: HTMLDivElement[] = [];
+  private language: UiLanguage = DEFAULT_UI_LANGUAGE;
 
   constructor(parent: HTMLElement) {
     this.root.className = 'hud-layer';
 
     this.crosshair.className = 'crosshair';
     this.generationLabel.className = 'generation-label';
-    this.generationLabel.textContent = 'Generating...';
+    this.generationLabel.textContent = translate('hud.generating', {}, this.language);
     this.generationLabel.style.display = 'none';
     this.fpsLabel.className = 'fps-label';
     this.fpsLabel.textContent = 'FPS 0';
@@ -71,6 +73,11 @@ export class Hud {
 
   setVisible(visible: boolean): void {
     this.root.style.display = visible ? '' : 'none';
+  }
+
+  setLanguage(language: UiLanguage): void {
+    this.language = language;
+    this.generationLabel.textContent = translate('hud.generating', {}, this.language);
   }
 
   setTargetLabel(label: string | null): void {

@@ -77,6 +77,13 @@ const SHOWCASE_BASE_POSE: ShowcasePose = {
   rightLeg: { x: -0.04, y: 0, z: 0 },
 };
 
+const IS_FIREFOX = typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent);
+const ANIMATED_PIXEL_RATIO_CAP = IS_FIREFOX ? 0.9 : 1;
+const STATIC_PIXEL_RATIO_CAP = IS_FIREFOX ? 0.95 : 1;
+const MAX_FRAME_DELTA_SECONDS = 1 / 20;
+const ANIMATED_TARGET_FPS = IS_FIREFOX ? 24 : 30;
+const ANIMATED_MIN_FRAME_MS = 1000 / ANIMATED_TARGET_FPS;
+
 export class SkinViewer {
   private readonly scene = new Scene();
   private readonly camera = new PerspectiveCamera(42, 1, 0.1, 20);
@@ -94,6 +101,9 @@ export class SkinViewer {
   private rafId = 0;
   private skinRequestId = 0;
   private elapsedSeconds = 0;
+  private active = true;
+  private contextLost = false;
+  private lastAnimatedRenderAt = 0;
   private disposed = false;
 
   constructor(
@@ -103,7 +113,7 @@ export class SkinViewer {
   ) {
     this.animated = options.animated ?? true;
     this.animationMode = options.animationMode ?? 'spin';
-    this.pixelRatioCap = this.animated ? 1.5 : 1;
+    this.pixelRatioCap = this.animated ? ANIMATED_PIXEL_RATIO_CAP : STATIC_PIXEL_RATIO_CAP;
     this.showcaseTimeline = this.buildShowcaseTimeline();
     this.showcaseCycleDuration = this.showcaseTimeline.reduce(
       (total, clip) => total + clip.duration,
@@ -117,6 +127,8 @@ export class SkinViewer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.pixelRatioCap));
     this.renderer.setClearColor(new Color('#000000'), 0);
     this.renderer.domElement.className = 'paperdoll-canvas';
+    this.renderer.domElement.addEventListener('webglcontextlost', this.handleContextLost, false);
+    this.renderer.domElement.addEventListener('webglcontextrestored', this.handleContextRestored, false);
     this.container.append(this.renderer.domElement);
 
     this.camera.position.set(0, 1.02, 3.9);
@@ -131,10 +143,28 @@ export class SkinViewer {
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.container);
     this.resize();
-    if (this.animated) {
-      this.animate();
-    }
+    this.startAnimationLoop();
     void this.setSkin(initialSkinDataUrl);
+  }
+
+  setActive(active: boolean): void {
+    if (this.disposed || this.active === active) {
+      return;
+    }
+
+    this.active = active;
+    if (this.animated) {
+      if (this.active) {
+        this.startAnimationLoop();
+      } else {
+        this.stopAnimationLoop();
+      }
+      return;
+    }
+
+    if (this.active) {
+      this.renderFrame();
+    }
   }
 
   async setSkin(dataUrl: string | null): Promise<void> {
@@ -164,15 +194,18 @@ export class SkinViewer {
     this.rig = this.captureRig(this.model);
     this.applyPose(this.elapsedSeconds);
     this.scene.add(this.model);
-    if (!this.animated) {
+    if (!this.animated && this.active) {
       this.renderFrame();
     }
   }
 
   dispose(): void {
     this.disposed = true;
+    this.contextLost = true;
     this.resizeObserver.disconnect();
-    cancelAnimationFrame(this.rafId);
+    this.stopAnimationLoop();
+    this.renderer.domElement.removeEventListener('webglcontextlost', this.handleContextLost);
+    this.renderer.domElement.removeEventListener('webglcontextrestored', this.handleContextRestored);
     if (this.model) {
       this.scene.remove(this.model);
       disposeModel(this.model);
@@ -180,23 +213,70 @@ export class SkinViewer {
     }
     this.rig = null;
     this.renderer.dispose();
+    this.renderer.domElement.remove();
   }
 
   private resize(): void {
+    if (this.disposed || this.contextLost) {
+      return;
+    }
     const width = Math.max(20, this.container.clientWidth);
     const height = Math.max(20, this.container.clientHeight);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.pixelRatioCap));
     this.renderer.setSize(width, height, false);
-    if (!this.animated) {
+    if (!this.animated && this.active) {
       this.renderFrame();
     }
   }
 
   private renderFrame(): void {
+    if (this.disposed || this.contextLost || !this.active) {
+      return;
+    }
     this.renderer.render(this.scene, this.camera);
   }
+
+  private startAnimationLoop(): void {
+    if (!this.animated || !this.active || this.disposed || this.contextLost || this.rafId !== 0) {
+      return;
+    }
+    this.lastAnimatedRenderAt = 0;
+    this.clock.start();
+    this.clock.getDelta();
+    this.rafId = requestAnimationFrame(this.animate);
+  }
+
+  private stopAnimationLoop(): void {
+    if (this.rafId !== 0) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = 0;
+    }
+    this.clock.stop();
+  }
+
+  private readonly handleContextLost = (event: Event): void => {
+    event.preventDefault();
+    if (this.disposed) {
+      return;
+    }
+    this.contextLost = true;
+    this.stopAnimationLoop();
+  };
+
+  private readonly handleContextRestored = (): void => {
+    if (this.disposed) {
+      return;
+    }
+    this.contextLost = false;
+    this.resize();
+    if (this.animated) {
+      this.startAnimationLoop();
+    } else {
+      this.renderFrame();
+    }
+  };
 
   private captureRig(model: Group): SkinRig {
     model.updateMatrixWorld(true);
@@ -605,13 +685,21 @@ export class SkinViewer {
     return from + (to - from) * t;
   }
 
-  private animate = (): void => {
-    if (this.disposed || !this.animated) {
+  private animate = (timestamp: number): void => {
+    if (this.disposed || !this.animated || !this.active || this.contextLost) {
+      this.rafId = 0;
       return;
     }
     this.rafId = requestAnimationFrame(this.animate);
-    this.elapsedSeconds += this.clock.getDelta();
+    if (
+      this.lastAnimatedRenderAt !== 0 &&
+      timestamp - this.lastAnimatedRenderAt < ANIMATED_MIN_FRAME_MS
+    ) {
+      return;
+    }
+    this.lastAnimatedRenderAt = timestamp;
+    this.elapsedSeconds += Math.min(this.clock.getDelta(), MAX_FRAME_DELTA_SECONDS);
     this.applyPose(this.elapsedSeconds);
-    this.renderer.render(this.scene, this.camera);
+    this.renderFrame();
   };
 }

@@ -1,4 +1,6 @@
 import type { BlockDefinition, BlockId, BlockKey } from '../types/blocks';
+import { getCurrentLanguage, translate, type UiLanguage } from '../i18n/Language';
+import type { BlockMessageKey } from '../i18n/messages';
 
 interface InternalBlockDefinition extends BlockDefinition {
   uiColor: string;
@@ -18,7 +20,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   grass: {
     id: 1,
     key: 'grass',
-    label: 'Grass',
+    label: 'Herbe',
     solid: true,
     mineable: true,
     placeable: true,
@@ -31,7 +33,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   dirt: {
     id: 2,
     key: 'dirt',
-    label: 'Dirt',
+    label: 'Terre',
     solid: true,
     mineable: true,
     placeable: true,
@@ -44,7 +46,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   stone: {
     id: 3,
     key: 'stone',
-    label: 'Stone',
+    label: 'Pierre',
     solid: true,
     mineable: true,
     placeable: true,
@@ -57,7 +59,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   wood: {
     id: 4,
     key: 'wood',
-    label: 'Log',
+    label: 'Buche',
     solid: true,
     mineable: true,
     placeable: true,
@@ -70,7 +72,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   leaves: {
     id: 5,
     key: 'leaves',
-    label: 'Leaves',
+    label: 'Feuilles',
     solid: true,
     mineable: true,
     placeable: true,
@@ -96,7 +98,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   planks: {
     id: 7,
     key: 'planks',
-    label: 'Planks',
+    label: 'Planches',
     solid: true,
     mineable: true,
     placeable: true,
@@ -109,7 +111,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   crafting_table: {
     id: 8,
     key: 'crafting_table',
-    label: 'Crafting Table',
+    label: 'Table de craft',
     solid: true,
     mineable: true,
     placeable: true,
@@ -122,7 +124,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   stone_bricks: {
     id: 9,
     key: 'stone_bricks',
-    label: 'Stone Bricks',
+    label: 'Briques de pierre',
     solid: true,
     mineable: true,
     placeable: true,
@@ -135,7 +137,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   water: {
     id: 10,
     key: 'water',
-    label: 'Water',
+    label: 'Eau',
     solid: false,
     mineable: false,
     placeable: false,
@@ -150,7 +152,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   sand: {
     id: 11,
     key: 'sand',
-    label: 'Sand',
+    label: 'Sable',
     solid: true,
     mineable: true,
     placeable: true,
@@ -163,7 +165,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   clay: {
     id: 12,
     key: 'clay',
-    label: 'Clay',
+    label: 'Argile',
     solid: true,
     mineable: true,
     placeable: true,
@@ -176,7 +178,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   mud: {
     id: 13,
     key: 'mud',
-    label: 'Mud',
+    label: 'Boue',
     solid: true,
     mineable: true,
     placeable: true,
@@ -189,7 +191,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   grass_plant: {
     id: 14,
     key: 'grass_plant',
-    label: 'Tall Grass',
+    label: 'Hautes herbes',
     solid: false,
     mineable: true,
     placeable: true,
@@ -204,7 +206,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
   flower_red: {
     id: 15,
     key: 'flower_red',
-    label: 'Red Flower',
+    label: 'Fleur rouge',
     solid: false,
     mineable: true,
     placeable: true,
@@ -232,7 +234,13 @@ export const getBlockDefinition = (blockId: BlockId): BlockDefinition => {
 
 export const getBlockKey = (blockId: BlockId): BlockKey => getBlockDefinition(blockId).key;
 
-export const getBlockLabel = (blockId: BlockId): string => getBlockDefinition(blockId).label;
+export const getBlockLabel = (
+  blockId: BlockId,
+  language: UiLanguage = getCurrentLanguage(),
+): string => {
+  const blockKey: BlockMessageKey = getBlockDefinition(blockId).key;
+  return translate(`blocks.${blockKey}`, {}, language);
+};
 
 export const getUiBlockColor = (blockId: BlockId | null): string =>
   blockId === null ? 'transparent' : byId.get(blockId)?.uiColor ?? '#000';
