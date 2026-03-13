@@ -486,7 +486,7 @@ export class StartMenu {
     right.className = 'home-right-column home-avatar-column';
     const viewerStage = document.createElement('div');
     viewerStage.className = 'menu-player-stage bare-player-stage home-avatar-stage';
-    this.homeSkinViewer = new SkinViewer(viewerStage, null, { animationMode: 'spin' });
+    this.homeSkinViewer = new SkinViewer(viewerStage, null, { animationMode: 'idle', targetFps: 60 });
 
     const wardrobeButton = document.createElement('button');
     wardrobeButton.type = 'button';
@@ -1085,7 +1085,7 @@ export class StartMenu {
     previewWell.className = 'wardrobe-preview-column';
     const stage = document.createElement('div');
     stage.className = 'menu-player-stage bare-player-stage wardrobe-stage';
-    this.wardrobeSkinViewer = new SkinViewer(stage, null, { animationMode: 'showcase' });
+    this.wardrobeSkinViewer = new SkinViewer(stage, null, { animationMode: 'idle', targetFps: 60 });
     this.wardrobeSkinName.className = 'wardrobe-skin-name';
     this.wardrobeValidateButton.type = 'button';
     this.wardrobeValidateButton.className = 'menu-button wardrobe-validate-button';

@@ -17,6 +17,7 @@ type SkinAnimationMode = 'spin' | 'idle' | 'showcase';
 interface SkinViewerOptions {
   animated?: boolean;
   animationMode?: SkinAnimationMode;
+  targetFps?: number;
 }
 
 interface RigPart {
@@ -78,11 +79,10 @@ const SHOWCASE_BASE_POSE: ShowcasePose = {
 };
 
 const IS_FIREFOX = typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent);
-const ANIMATED_PIXEL_RATIO_CAP = IS_FIREFOX ? 0.9 : 1;
+const ANIMATED_PIXEL_RATIO_CAP = IS_FIREFOX ? 0.85 : 0.92;
 const STATIC_PIXEL_RATIO_CAP = IS_FIREFOX ? 0.95 : 1;
 const MAX_FRAME_DELTA_SECONDS = 1 / 20;
-const ANIMATED_TARGET_FPS = IS_FIREFOX ? 24 : 30;
-const ANIMATED_MIN_FRAME_MS = 1000 / ANIMATED_TARGET_FPS;
+const DEFAULT_ANIMATED_TARGET_FPS = IS_FIREFOX ? 24 : 30;
 
 export class SkinViewer {
   private readonly scene = new Scene();
@@ -93,6 +93,7 @@ export class SkinViewer {
   private readonly animated: boolean;
   private readonly animationMode: SkinAnimationMode;
   private readonly pixelRatioCap: number;
+  private readonly minAnimatedFrameMs: number;
   private readonly showcaseTimeline: ShowcaseClip[];
   private readonly showcaseCycleDuration: number;
   private readonly showcaseBlendDuration = 0.65;
@@ -114,6 +115,12 @@ export class SkinViewer {
     this.animated = options.animated ?? true;
     this.animationMode = options.animationMode ?? 'spin';
     this.pixelRatioCap = this.animated ? ANIMATED_PIXEL_RATIO_CAP : STATIC_PIXEL_RATIO_CAP;
+    const rawTargetFps = options.targetFps;
+    const targetFps =
+      typeof rawTargetFps === 'number' && Number.isFinite(rawTargetFps)
+        ? Math.max(1, Math.min(120, rawTargetFps))
+        : DEFAULT_ANIMATED_TARGET_FPS;
+    this.minAnimatedFrameMs = 1000 / targetFps;
     this.showcaseTimeline = this.buildShowcaseTimeline();
     this.showcaseCycleDuration = this.showcaseTimeline.reduce(
       (total, clip) => total + clip.duration,
@@ -693,7 +700,7 @@ export class SkinViewer {
     this.rafId = requestAnimationFrame(this.animate);
     if (
       this.lastAnimatedRenderAt !== 0 &&
-      timestamp - this.lastAnimatedRenderAt < ANIMATED_MIN_FRAME_MS
+      timestamp - this.lastAnimatedRenderAt < this.minAnimatedFrameMs
     ) {
       return;
     }

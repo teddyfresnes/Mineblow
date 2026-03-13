@@ -27,8 +27,8 @@ const CUBEMAP_FACE_SOURCE_INDEX = [
 ] as const;
 
 const IS_FIREFOX = typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent);
-const PANORAMA_PIXEL_RATIO_CAP = IS_FIREFOX ? 0.85 : 1;
-const PANORAMA_TARGET_FPS = IS_FIREFOX ? 24 : 30;
+const PANORAMA_PIXEL_RATIO_CAP = IS_FIREFOX ? 0.72 : 0.9;
+const PANORAMA_TARGET_FPS = IS_FIREFOX ? 18 : 24;
 const PANORAMA_MIN_FRAME_MS = 1000 / PANORAMA_TARGET_FPS;
 
 export class MenuPanorama {

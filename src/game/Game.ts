@@ -75,8 +75,8 @@ const EMPTY_CURSOR: InventorySlot = {
 const PRIMARY_MINING_HOLD_MS = 120;
 const PRIMARY_PUNCH_LOCK_MS = 0;
 const MENU_MUSIC_URL = new URL('../../assets/sounds/menu/menu.mp3', import.meta.url).href;
-const INTRO_SPLASH_DURATION_MS = 4600;
 const INTRO_SPLASH_MIN_VISIBLE_MS = 3000;
+const INTRO_SPLASH_DURATION_MS = INTRO_SPLASH_MIN_VISIBLE_MS;
 const WORLD_PREVIEW_CAPTURE_DELAY_FRAMES = 16;
 const WORLD_PREVIEW_SIZE = 256;
 
