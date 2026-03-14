@@ -2909,3 +2909,124 @@
 .hud-layer.inventory-open {
   z-index: 60;
 }
+
+/* Light inventory + hotbar pass: simple, readable, menu-button palette only */
+.inventory-layer {
+  color: #000;
+  background: rgba(198, 198, 198, 0.72);
+}
+
+.inventory-panel,
+.inventory-crafting-column,
+.inventory-center-board,
+.inventory-board,
+.inventory-side-card,
+.inventory-character-card {
+  border: 1px solid #585858;
+  background: linear-gradient(180deg, #c6c6c6, #a0a0a0);
+  box-shadow: none;
+}
+
+.hotbar {
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #585858;
+  background: linear-gradient(180deg, #c6c6c6, #a0a0a0);
+  box-shadow: none;
+}
+
+.inventory-slot,
+.hotbar-slot {
+  width: var(--ui-slot-size);
+  min-width: var(--ui-slot-size);
+  border: 1px solid #7b7b7b;
+  background: #c6c6c6;
+  box-shadow: none;
+  transform: none;
+}
+
+.inventory-slot:hover,
+.hotbar-slot:hover {
+  border-color: #585858;
+}
+
+.inventory-slot.selected,
+.hotbar-slot.selected {
+  border-color: #000;
+  box-shadow: inset 0 0 0 1px #a0a0a0;
+  transform: none;
+}
+
+.inventory-slot.filled .inventory-slot-preview {
+  box-shadow: none;
+}
+
+.inventory-slot-preview,
+.slot-preview {
+  position: absolute;
+  inset: 5px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  box-shadow: none;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-shadow: none;
+  color: #585858;
+}
+
+.inventory-slot-count,
+.slot-count {
+  right: 3px;
+  bottom: 2px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #000;
+  text-shadow: none;
+}
+
+.inventory-cursor-ghost-count {
+  color: #000;
+  text-shadow: none;
+}
+
+.inventory-hover {
+  border: 1px solid #585858;
+  background: #c6c6c6;
+  color: #000;
+}
+
+.inventory-cursor-ghost {
+  border: 1px solid #585858;
+  background: #c6c6c6;
+  box-shadow: none;
+}
+
+.inventory-cursor-ghost-preview {
+  inset: 5px;
+  border: 0;
+  color: #585858;
+}
+
+.equipment-slot {
+  border: 1px solid #7b7b7b;
+  background: #c6c6c6;
+  color: #585858;
+}
+
+.equipment-slot.locked {
+  background: #a0a0a0;
+}
+
+.recipe-card {
+  border: 1px solid #585858;
+  background: #c6c6c6;
+  box-shadow: none;
+  color: #000;
+}
+
+.inventory-filter-button.active {
+  border-color: #585858;
+  background: linear-gradient(180deg, #a0a0a0, #7b7b7b);
+  box-shadow: none;
+}
