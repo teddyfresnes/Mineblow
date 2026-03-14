@@ -2,6 +2,16 @@ import type { InventorySlot } from '../types/player';
 import { getUiBlockColor } from '../world/BlockRegistry';
 import { DEFAULT_UI_LANGUAGE, translate, type UiLanguage } from '../i18n/Language';
 
+export interface HotbarInteractEvent {
+  index: number;
+  button: 'left' | 'right';
+  shift: boolean;
+}
+
+interface HudHandlers {
+  onHotbarInteract?: (event: HotbarInteractEvent) => void;
+}
+
 export class Hud {
   private readonly root = document.createElement('div');
   private readonly crosshair = document.createElement('div');
@@ -12,10 +22,10 @@ export class Hud {
   private readonly levelFill = document.createElement('div');
   private readonly levelLabel = document.createElement('div');
   private readonly hotbar = document.createElement('div');
-  private readonly slotElements: HTMLDivElement[] = [];
+  private readonly slotElements: HTMLButtonElement[] = [];
   private language: UiLanguage = DEFAULT_UI_LANGUAGE;
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, private readonly handlers: HudHandlers = {}) {
     this.root.className = 'hud-layer';
 
     this.crosshair.className = 'crosshair';
@@ -45,8 +55,25 @@ export class Hud {
     this.hotbar.className = 'hotbar';
 
     for (let index = 0; index < 9; index += 1) {
-      const slot = document.createElement('div');
+      const slot = document.createElement('button');
+      slot.type = 'button';
       slot.className = 'hotbar-slot';
+      slot.dataset.hotbarIndex = String(index);
+      slot.addEventListener('contextmenu', (event) => event.preventDefault());
+      slot.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0 && event.button !== 2) {
+          return;
+        }
+        if (this.root.classList.contains('inventory-open')) {
+          return;
+        }
+        event.preventDefault();
+        this.handlers.onHotbarInteract?.({
+          index,
+          button: event.button === 0 ? 'left' : 'right',
+          shift: event.shiftKey,
+        });
+      });
 
       const preview = document.createElement('div');
       preview.className = 'slot-preview';
@@ -73,6 +100,10 @@ export class Hud {
 
   setVisible(visible: boolean): void {
     this.root.style.display = visible ? '' : 'none';
+  }
+
+  setInventoryOverlayActive(active: boolean): void {
+    this.root.classList.toggle('inventory-open', active);
   }
 
   setLanguage(language: UiLanguage): void {

@@ -10,6 +10,7 @@ export const CONTROL_ACTIONS = [
   'crouch',
   'sprint',
   'inventory',
+  'drop',
   'debug',
   'pause',
 ] as const;
@@ -50,6 +51,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
   crouch: { primary: 'Numpad0', secondary: 'ControlLeft' },
   sprint: { primary: 'ShiftLeft', secondary: 'ShiftRight' },
   inventory: { primary: 'KeyI', secondary: 'Tab' },
+  drop: { primary: 'KeyD', secondary: 'Numpad6' },
   debug: { primary: 'F3', secondary: null },
   pause: { primary: 'Escape', secondary: null },
 };

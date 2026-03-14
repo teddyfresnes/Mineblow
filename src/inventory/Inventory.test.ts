@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Inventory } from './Inventory';
+import { INVENTORY_LAYOUT, Inventory } from './Inventory';
 
 describe('Inventory', () => {
   it('adds blocks to existing stacks before using free slots', () => {
@@ -8,7 +8,7 @@ describe('Inventory', () => {
     inventory.addBlock(3);
     inventory.addBlock(3);
 
-    expect(inventory.getSlots()[27]).toEqual({
+    expect(inventory.getSlots()[INVENTORY_LAYOUT.hotbarStart]).toEqual({
       blockId: 3,
       count: 2,
     });
@@ -16,7 +16,7 @@ describe('Inventory', () => {
 
   it('consumes the selected hotbar stack and clears it when empty', () => {
     const inventory = new Inventory();
-    inventory.setSlot(27, { blockId: 4, count: 1 });
+    inventory.setSlot(INVENTORY_LAYOUT.hotbarStart, { blockId: 4, count: 1 });
 
     expect(inventory.consumeSelectedBlock()).toBe(4);
     expect(inventory.getHotbarSlots()[0]).toEqual({

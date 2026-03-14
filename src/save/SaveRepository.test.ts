@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
+import { INVENTORY_LAYOUT } from '../inventory/Inventory';
 import { SaveRepository } from './SaveRepository';
 
 describe('SaveRepository', () => {
@@ -18,7 +19,7 @@ describe('SaveRepository', () => {
         selectedSlot: 2,
         spawnPoint: [1, 2, 3],
       },
-      Array.from({ length: 36 }, (_, index) => ({
+      Array.from({ length: INVENTORY_LAYOUT.totalSlotCount }, (_, index) => ({
         blockId: index === 0 ? 3 : null,
         count: index === 0 ? 4 : 0,
       })),

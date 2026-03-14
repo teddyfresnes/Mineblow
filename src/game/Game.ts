@@ -7,7 +7,7 @@ import {
   type GameSettings,
 } from './Controls';
 import { GameLoop } from './GameLoop';
-import { Inventory, MAX_STACK } from '../inventory/Inventory';
+import { INVENTORY_LAYOUT, Inventory, MAX_STACK } from '../inventory/Inventory';
 import {
   canCraftRecipe,
   craftRecipe,
@@ -32,7 +32,7 @@ import type { VoxelHit } from '../types/world';
 import { debounce } from '../utils/debounce';
 import { setCurrentLanguage } from '../i18n/Language';
 import { DebugOverlay } from '../ui/DebugOverlay';
-import { Hud } from '../ui/Hud';
+import { Hud, type HotbarInteractEvent } from '../ui/Hud';
 import {
   InventoryScreen,
   type InventoryScreenState,
@@ -163,26 +163,21 @@ export class Game {
     this.renderer = new Renderer(this.canvas);
     this.renderer.setFirstPersonHandVisible(false);
     this.input = new InputController(this.canvas);
-    this.hud = new Hud(this.shell);
+    this.hud = new Hud(this.shell, {
+      onHotbarInteract: (event) => {
+        this.handleHudHotbarInteract(event);
+      },
+    });
     this.debugOverlay = new DebugOverlay(this.shell);
     this.inventoryScreen = new InventoryScreen(this.shell, {
-      onClose: () => {
-        void this.closeInventory();
-      },
       onSlotInteract: (event) => {
         this.handleInventorySlotInteract(event);
       },
       onRecipeCraft: (recipeId) => {
         this.handleCraftRecipe(recipeId);
       },
-      onSkinChange: (skinDataUrl) => {
-        this.applySettings({
-          keyBindings: cloneBindings(this.settings.keyBindings),
-          skinDataUrl,
-          startFullscreen: this.settings.startFullscreen,
-          interfaceSize: this.settings.interfaceSize,
-          language: this.settings.language,
-        });
+      onCursorDrop: () => {
+        this.handleInventoryCursorDrop();
       },
     });
     this.menu = new StartMenu(this.shell, {
@@ -311,6 +306,7 @@ export class Game {
     this.renderer.setFirstPersonHandVisible(false);
     this.renderer.setMiningOverlay(null, 0);
     this.hud.setMiningProgress(0);
+    this.hud.setInventoryOverlayActive(false);
     this.hud.setVisible(false);
     this.menu.setGlobalStats(this.globalStats);
     this.menu.setPauseWorld(null);
@@ -417,6 +413,7 @@ export class Game {
     const [playerX, , playerZ] = session.player.getPosition();
     session.world.enqueueStreamingAround(playerX, playerZ);
     this.syncChunkMeshes();
+    this.hud.setInventoryOverlayActive(false);
     this.hud.setVisible(true);
     this.hud.setHandSkin(this.settings.skinDataUrl);
     this.renderer.setPlayerSkin(this.settings.skinDataUrl);
@@ -437,6 +434,7 @@ export class Game {
   }
 
   private async resumeSession(): Promise<void> {
+    this.hud.setInventoryOverlayActive(false);
     this.hud.setVisible(true);
     this.menu.hide();
     try {
@@ -475,6 +473,11 @@ export class Game {
       this.settings.keyBindings.pause.secondary,
       'Escape',
     ]);
+
+    const dropPressed = this.input.consumeAnyJustPressed([
+      this.settings.keyBindings.drop.primary,
+      this.settings.keyBindings.drop.secondary,
+    ]);
     if (this.inventoryScreen.isVisible() && pausePressed) {
       void this.closeInventory();
     }
@@ -485,6 +488,14 @@ export class Game {
     }
 
     const { world, player, inventory } = this.session;
+
+    if (dropPressed && !this.menu.isVisible()) {
+      if (this.inventoryScreen.isVisible() && this.inventoryCursor.blockId !== null && this.inventoryCursor.count > 0) {
+        this.handleInventoryCursorDrop();
+      } else {
+        this.dropSelectedHotbarFromKeybind();
+      }
+    }
 
     if (
       pausePressed &&
@@ -498,17 +509,21 @@ export class Game {
       this.hud.setVisible(false);
     }
 
-    if (!this.inventoryScreen.isVisible()) {
-      const wheelSteps = this.input.consumeWheelSteps();
-      if (wheelSteps !== 0) {
-        inventory.shiftSelectedHotbar(wheelSteps);
-        player.setSelectedSlot(inventory.getSelectedHotbarIndex());
+    if (!this.menu.isVisible()) {
+      if (!this.inventoryScreen.isVisible()) {
+        const wheelSteps = this.input.consumeWheelSteps();
+        if (wheelSteps !== 0) {
+          inventory.shiftSelectedHotbar(wheelSteps);
+          player.setSelectedSlot(inventory.getSelectedHotbarIndex());
+        }
       }
-
       const directSlot = this.input.consumeNumberSlot();
       if (directSlot !== null) {
         inventory.setSelectedHotbarIndex(directSlot);
         player.setSelectedSlot(inventory.getSelectedHotbarIndex());
+        if (this.inventoryScreen.isVisible()) {
+          this.refreshInventoryScreen();
+        }
       }
     }
     this.updateFirstPersonHandVisibility(inventory);
@@ -833,7 +848,8 @@ export class Game {
 
     this.inventoryMode = mode;
     this.inventoryScreen.setVisible(true);
-    this.hud.setVisible(false);
+    this.hud.setInventoryOverlayActive(true);
+    this.hud.setVisible(true);
     this.input.exitPointerLock();
     this.refreshInventoryScreen();
   }
@@ -850,6 +866,7 @@ export class Game {
     }
 
     this.inventoryScreen.setVisible(false);
+    this.hud.setInventoryOverlayActive(false);
     await this.persistProfile(true);
     await this.resumeSession();
   }
@@ -882,9 +899,101 @@ export class Game {
       return;
     }
 
+    this.interactInventorySlot(event.index, event.button, event.shift);
+  }
+
+  private handleHudHotbarInteract(event: HotbarInteractEvent): void {
+    if (!this.session || !this.inventoryScreen.isVisible()) {
+      return;
+    }
+
+    const absoluteIndex = INVENTORY_LAYOUT.hotbarStart + event.index;
+    const shiftHeld =
+      this.input.isKeyDown('ShiftLeft') ||
+      this.input.isKeyDown('ShiftRight') ||
+      event.shift;
+    this.interactInventorySlot(absoluteIndex, event.button, shiftHeld);
+  }
+
+  private handleInventoryCursorDrop(): void {
+    if (!this.session || !this.inventoryScreen.isVisible()) {
+      return;
+    }
+
+    if (this.inventoryCursor.blockId === null || this.inventoryCursor.count <= 0) {
+      return;
+    }
+
+    this.throwItemsFromPlayer(this.inventoryCursor.blockId, this.inventoryCursor.count);
+    this.inventoryCursor = { blockId: null, count: 0 };
+    this.refreshInventoryScreen();
+    void this.persistProfile(true);
+  }
+
+  private dropSelectedHotbarFromKeybind(): void {
+    if (!this.session) {
+      return;
+    }
+
     const inventory = this.session.inventory;
-    const index = event.index;
-    if (event.shift && this.inventoryCursor.blockId === null) {
+    const selectedIndex = inventory.getSelectedAbsoluteSlotIndex();
+    const selected = inventory.getSlot(selectedIndex);
+    if (selected.blockId === null || selected.count <= 0) {
+      return;
+    }
+
+    const dropWholeStack = this.input.isKeyDown('ControlLeft') || this.input.isKeyDown('ControlRight');
+    const dropCount = dropWholeStack ? selected.count : 1;
+    const remaining = selected.count - dropCount;
+
+    inventory.setSlot(
+      selectedIndex,
+      remaining > 0 ? { blockId: selected.blockId, count: remaining } : { blockId: null, count: 0 },
+    );
+    this.throwItemsFromPlayer(selected.blockId, dropCount);
+
+    this.hud.updateHotbar(inventory.getHotbarSlots(), inventory.getSelectedHotbarIndex());
+    this.updateFirstPersonHandVisibility(inventory);
+    if (this.inventoryScreen.isVisible()) {
+      this.refreshInventoryScreen();
+    }
+    void this.persistProfile(true);
+  }
+
+  private throwItemsFromPlayer(blockId: BlockId, count: number): void {
+    if (!this.session || count <= 0) {
+      return;
+    }
+
+    const origin = this.session.player.getCameraPosition();
+    const direction = this.session.player.getLookDirection();
+    const startX = origin.x + direction.x * 0.5;
+    const startY = origin.y - 0.25 + direction.y * 0.25;
+    const startZ = origin.z + direction.z * 0.5;
+
+    for (let index = 0; index < count; index += 1) {
+      const spread = 0.32;
+      const speed = 5.2 + Math.random() * 0.9;
+      const velocity: [number, number, number] = [
+        direction.x * speed + (Math.random() - 0.5) * spread,
+        direction.y * speed * 0.42 + 1.35 + (Math.random() - 0.5) * 0.24,
+        direction.z * speed + (Math.random() - 0.5) * spread,
+      ];
+      this.spawnDroppedItem(blockId, startX, startY, startZ, velocity);
+    }
+  }
+
+  private interactInventorySlot(index: number, button: 'left' | 'right', shift: boolean): void {
+    if (!this.session) {
+      return;
+    }
+
+    if (index < 0 || index >= INVENTORY_LAYOUT.totalSlotCount) {
+      return;
+    }
+
+    const inventory = this.session.inventory;
+    if (shift && this.inventoryCursor.blockId === null) {
       if (this.transferStackBetweenSections(inventory, index)) {
         this.refreshInventoryScreen();
       }
@@ -893,7 +1002,7 @@ export class Game {
 
     const slot = inventory.getSlot(index);
 
-    if (event.button === 'left') {
+    if (button === 'left') {
       if (this.inventoryCursor.blockId === null || this.inventoryCursor.count === 0) {
         if (slot.blockId === null || slot.count === 0) {
           return;
@@ -1076,6 +1185,7 @@ export class Game {
       this.menu.setGlobalStats(this.globalStats);
       this.updatePauseMenuSnapshot();
       this.menu.showPause();
+      this.hud.setInventoryOverlayActive(false);
       this.hud.setVisible(false);
     }
   }
@@ -1106,13 +1216,21 @@ export class Game {
     await this.saveRepository.saveChunkDiffs(this.session.id, this.session.world.getAllDiffRecords());
   }
 
-  private spawnDroppedItem(blockId: BlockId, x: number, y: number, z: number): void {
+  private spawnDroppedItem(
+    blockId: BlockId,
+    x: number,
+    y: number,
+    z: number,
+    initialVelocity?: [number, number, number],
+  ): void {
     const id = `drop-${++this.dropSequence}`;
-    const velocity: [number, number, number] = [
-      (Math.random() - 0.5) * 2.6,
-      2.5 + Math.random() * 1.6,
-      (Math.random() - 0.5) * 2.6,
-    ];
+    const velocity: [number, number, number] = initialVelocity
+      ? [initialVelocity[0], initialVelocity[1], initialVelocity[2]]
+      : [
+          (Math.random() - 0.5) * 2.6,
+          2.5 + Math.random() * 1.6,
+          (Math.random() - 0.5) * 2.6,
+        ];
     const dropped: DroppedItem = {
       id,
       blockId,
@@ -1296,6 +1414,7 @@ export class Game {
   private applyInterfaceZoom(interfaceSize: number): void {
     const zoomPercent = getInterfaceZoomPercent(interfaceSize);
     this.root.style.setProperty('zoom', `${zoomPercent}%`);
+    this.root.style.setProperty('--ui-zoom-factor', `${zoomPercent / 100}`);
   }
 
   private normalizeWorldStats(stats: WorldStats | undefined): WorldStats {
@@ -1377,7 +1496,10 @@ export class Game {
       return false;
     }
 
-    const toRange = fromIndex < 27 ? [27, 35] as const : [0, 26] as const;
+    const toRange =
+      fromIndex < INVENTORY_LAYOUT.hotbarStart
+        ? [INVENTORY_LAYOUT.hotbarStart, INVENTORY_LAYOUT.totalSlotCount - 1] as const
+        : [0, INVENTORY_LAYOUT.hotbarStart - 1] as const;
     let remaining = source.count;
 
     for (let index = toRange[0]; index <= toRange[1]; index += 1) {

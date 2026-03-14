@@ -2,7 +2,7 @@ import type { BlockId } from '../types/blocks';
 import type { InventorySlot } from '../types/player';
 
 export const MAX_STACK = 128;
-const MAIN_SLOT_COUNT = 27;
+const MAIN_SLOT_COUNT = 36;
 const HOTBAR_SLOT_COUNT = 9;
 const TOTAL_SLOT_COUNT = MAIN_SLOT_COUNT + HOTBAR_SLOT_COUNT;
 const HOTBAR_START = MAIN_SLOT_COUNT;
