@@ -80,6 +80,7 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
     textureTop: 'leaves',
     textureSide: 'leaves',
     textureBottom: 'leaves',
+    transparent: true,
     uiColor: '#4d8748',
   },
   bedrock: {

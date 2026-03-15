@@ -1,6 +1,7 @@
 import {
   ACESFilmicToneMapping,
   AmbientLight,
+  BufferAttribute,
   BoxGeometry,
   BufferGeometry,
   Color,
@@ -18,7 +19,9 @@ import {
   WebGLRenderer,
 } from 'three';
 import { WORLD_CONFIG } from '../game/Config';
+import type { BlockId } from '../types/blocks';
 import type { VoxelHit } from '../types/world';
+import { getBlockDefinition } from '../world/BlockRegistry';
 import { addSceneLights, type SceneLights, updateSunForCamera } from './SceneLights';
 import { createFirstPersonHand, disposeModel, loadSkinTexture } from './SkinModel';
 import { SkyDome } from './SkyDome';
@@ -362,7 +365,7 @@ export class Renderer {
     }
   }
 
-  spawnDroppedItem(itemId: string, color: string, x: number, y: number, z: number): void {
+  spawnDroppedItem(itemId: string, blockId: BlockId, x: number, y: number, z: number): void {
     const existing = this.droppedItems.get(itemId);
     if (existing) {
       this.scene.remove(existing);
@@ -371,9 +374,11 @@ export class Renderer {
     }
 
     const mesh = new Mesh(
-      new BoxGeometry(0.26, 0.26, 0.26),
+      this.createDroppedItemGeometry(blockId),
       new MeshLambertMaterial({
-        color: new Color(color),
+        map: this.atlas.material.map,
+        transparent: true,
+        alphaTest: 0.35,
       }),
     );
     mesh.position.set(x, y, z);
@@ -523,5 +528,31 @@ export class Renderer {
 
     this.handModel = createFirstPersonHand(skin.texture, skin.model);
     this.handRig.add(this.handModel);
+  }
+
+  private createDroppedItemGeometry(blockId: BlockId): BoxGeometry {
+    const geometry = new BoxGeometry(0.26, 0.26, 0.26);
+    const uv = geometry.getAttribute('uv');
+    if (!(uv instanceof BufferAttribute)) {
+      return geometry;
+    }
+
+    const definition = getBlockDefinition(blockId);
+    const topRect = this.atlas.getTileRect(definition.textureTop ?? definition.textureSide ?? 'dirt');
+    const sideRect = this.atlas.getTileRect(definition.textureSide ?? definition.textureTop ?? 'dirt');
+    const bottomRect = this.atlas.getTileRect(
+      definition.textureBottom ?? definition.textureSide ?? definition.textureTop ?? 'dirt',
+    );
+    const faces = [sideRect, sideRect, topRect, bottomRect, sideRect, sideRect] as const;
+
+    faces.forEach((rect, faceIndex) => {
+      const vertexOffset = faceIndex * 4;
+      uv.setXY(vertexOffset, rect.u0, rect.v1);
+      uv.setXY(vertexOffset + 1, rect.u1, rect.v1);
+      uv.setXY(vertexOffset + 2, rect.u0, rect.v0);
+      uv.setXY(vertexOffset + 3, rect.u1, rect.v0);
+    });
+    uv.needsUpdate = true;
+    return geometry;
   }
 }

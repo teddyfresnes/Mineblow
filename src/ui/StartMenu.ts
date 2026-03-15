@@ -121,6 +121,7 @@ export class StartMenu {
   private readonly saveEditWorldButton = document.createElement('button');
   private readonly startupFullscreenToggleButton = document.createElement('button');
   private readonly interfaceSizeToggleButton = document.createElement('button');
+  private readonly statsTitleHost = document.createElement('div');
   private readonly statsList = document.createElement('div');
   private readonly wardrobeCategorySelect = document.createElement('select');
   private readonly wardrobeCategoryList = document.createElement('div');
@@ -137,7 +138,6 @@ export class StartMenu {
   private readonly wardrobeValidateButton = document.createElement('button');
   private readonly pauseTitle = document.createElement('h2');
   private readonly pauseMeta = document.createElement('div');
-  private readonly pauseStats = document.createElement('dl');
   private homeSkinViewer!: SkinViewer;
   private wardrobeSkinViewer!: SkinViewer;
   private mode: MenuMode = 'boot';
@@ -173,6 +173,7 @@ export class StartMenu {
   private wardrobeGalleryLoading = false;
   private readonly wardrobeGalleryChunkSize = 6;
   private selectedStatsCategory: StatsCategory = 'general';
+  private skipNextEscapeShortcut = false;
   private homeLeftColumn: HTMLDivElement | null = null;
   private homeActionsColumn: HTMLDivElement | null = null;
   private readonly handleHomeAlignmentResize = (): void => {
@@ -356,6 +357,7 @@ export class StartMenu {
       ? { id: world.id, name: world.name, seed: world.seed, worldStats: { ...world.worldStats } }
       : null;
     this.renderPauseView();
+    this.renderStatsView();
   }
 
   showBoot(): void {
@@ -392,6 +394,37 @@ export class StartMenu {
 
   getMode(): MenuMode {
     return this.mode;
+  }
+
+  handleEscapeShortcut(): boolean {
+    if (!this.isVisible()) {
+      return false;
+    }
+
+    if (this.skipNextEscapeShortcut) {
+      this.skipNextEscapeShortcut = false;
+      return true;
+    }
+
+    if (this.listeningBinding) {
+      this.listeningBinding = null;
+      this.renderBindings();
+      return true;
+    }
+
+    if (this.mode === 'pause' && this.currentScreen === 'pause') {
+      this.hide();
+      this.handlers.onResume();
+      return true;
+    }
+
+    const backScreen = this.getBackScreenForEscape(this.currentScreen);
+    if (!backScreen) {
+      return false;
+    }
+
+    this.showScreen(backScreen);
+    return true;
   }
 
   private t(key: MenuMessageKey): string {
@@ -954,7 +987,10 @@ export class StartMenu {
     const view = document.createElement('section');
     view.className = 'menu-view menu-view-classic stats-view';
 
-    view.append(this.buildClassicTitle('statsTitle'));
+    const header = document.createElement('div');
+    header.className = 'classic-screen-header';
+    header.append(this.statsTitleHost);
+    view.append(header);
 
     const frame = document.createElement('div');
     frame.className = 'classic-screen-frame stats-screen-frame';
@@ -992,7 +1028,7 @@ export class StartMenu {
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
     this.localizeText(backButton, 'back');
-    backButton.addEventListener('click', () => this.showScreen('home'));
+    backButton.addEventListener('click', () => this.showScreen(this.mode === 'pause' ? 'pause' : 'home'));
     footer.append(backButton);
 
     view.append(frame, footer);
@@ -1006,7 +1042,6 @@ export class StartMenu {
     const panel = document.createElement('div');
     panel.className = 'menu-well pause-well';
     this.pauseMeta.className = 'menu-label';
-    this.pauseStats.className = 'stats-list';
 
     const actions = document.createElement('div');
     actions.className = 'title-actions';
@@ -1015,11 +1050,12 @@ export class StartMenu {
         this.hide();
         this.handlers.onResume();
       }),
+      this.buildMainButton('pauseStats', () => this.showScreen('stats')),
       this.buildMainButton('pauseSettings', () => this.showScreen('settings')),
       this.buildMainButton('pauseQuit', () => this.handlers.onQuitToTitle()),
     );
 
-    panel.append(this.pauseTitle, this.pauseMeta, this.pauseStats, actions);
+    panel.append(this.pauseTitle, this.pauseMeta, actions);
     view.append(panel);
     return view;
   }
@@ -1284,12 +1320,34 @@ export class StartMenu {
   }
 
   private renderStatsView(): void {
+    this.renderStatsTitle();
     this.statsCategoryButtons.forEach((button, category) => {
       button.classList.toggle('active', category === this.selectedStatsCategory);
     });
 
-    const entries: Array<[string, string]> =
-      this.selectedStatsCategory === 'general'
+    const showingPauseWorldStats = this.mode === 'pause';
+    const snapshot = this.pauseWorld ?? {
+      id: 'none',
+      name: this.t('pauseDefaultWorldName'),
+      seed: this.t('pauseNotAvailable'),
+      worldStats: createEmptyWorldStats(),
+    };
+
+    const entries: Array<[string, string]> = showingPauseWorldStats
+      ? this.selectedStatsCategory === 'general'
+        ? [
+            [this.t('playTime'), this.formatDuration(snapshot.worldStats.playTimeMs)],
+            [this.t('distanceTravelled'), `${Math.round(snapshot.worldStats.distanceTravelled).toLocaleString()} m`],
+            [this.t('jumps'), snapshot.worldStats.jumps.toLocaleString()],
+            [this.t('pauseWorldName'), snapshot.name],
+          ]
+        : [
+            [this.t('blocksMined'), snapshot.worldStats.blocksMined.toLocaleString()],
+            [this.t('blocksPlaced'), snapshot.worldStats.blocksPlaced.toLocaleString()],
+            [this.t('craftedItems'), snapshot.worldStats.craftedItems.toLocaleString()],
+            [this.t('pauseWorldSeed'), snapshot.seed],
+          ]
+      : this.selectedStatsCategory === 'general'
         ? [
             [this.t('playTime'), this.formatDuration(this.globalStats.totalPlayTimeMs)],
             [this.t('distanceTravelled'), `${Math.round(this.globalStats.totalDistanceTravelled).toLocaleString()} m`],
@@ -1316,14 +1374,6 @@ export class StartMenu {
 
     this.pauseTitle.textContent = snapshot.name;
     this.pauseMeta.textContent = this.tf('pauseSeed', { seed: snapshot.seed });
-    this.pauseStats.replaceChildren(
-      ...this.buildDefinitionListEntries([
-        [this.t('playTime'), this.formatDuration(snapshot.worldStats.playTimeMs)],
-        [this.t('pauseBlocksMined'), snapshot.worldStats.blocksMined.toLocaleString()],
-        [this.t('pauseBlocksPlaced'), snapshot.worldStats.blocksPlaced.toLocaleString()],
-        [this.t('pauseDistance'), `${Math.round(snapshot.worldStats.distanceTravelled).toLocaleString()} m`],
-      ]),
-    );
   }
 
   private renderGraphicsView(): void {
@@ -2184,6 +2234,7 @@ export class StartMenu {
     event.preventDefault();
     const { action, slot } = this.listeningBinding;
     if (event.code === 'Escape') {
+      this.skipNextEscapeShortcut = true;
       this.listeningBinding = null;
       this.renderBindings();
       return;
@@ -2240,16 +2291,39 @@ export class StartMenu {
     });
   }
 
-  private buildDefinitionListEntries(entries: Array<[string, string]>): HTMLElement[] {
-    const nodes: HTMLElement[] = [];
-    entries.forEach(([label, value]) => {
-      const dt = document.createElement('dt');
-      dt.textContent = label;
-      const dd = document.createElement('dd');
-      dd.textContent = value;
-      nodes.push(dt, dd);
+  private renderStatsTitle(): void {
+    const titleKey: MenuMessageKey = this.mode === 'pause' ? 'statsWorldTitle' : 'statsTitle';
+    const titleText = this.t(titleKey);
+    const titleBitmap = createBitmapText(titleText, {
+      className: 'classic-screen-title classic-title-text',
+      uppercase: true,
+      ariaLabel: titleText,
+      glyphGapEm: 0.04,
     });
-    return nodes;
+    this.statsTitleHost.replaceChildren(titleBitmap);
+  }
+
+  private getBackScreenForEscape(screen: MenuScreen): MenuScreen | null {
+    switch (screen) {
+      case 'singleplayer':
+      case 'wardrobe':
+        return 'home';
+      case 'create-world':
+      case 'edit-world':
+        return 'singleplayer';
+      case 'keybindings':
+      case 'graphics':
+      case 'languages':
+        return 'settings';
+      case 'settings':
+      case 'stats':
+        return this.mode === 'pause' ? 'pause' : 'home';
+      case 'pause':
+      case 'home':
+        return null;
+      default:
+        return null;
+    }
   }
 
   private getWorldPreviewUrl(world: WorldSummary): string {

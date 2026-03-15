@@ -4,6 +4,7 @@ import {
   getBlockDefinition,
   isPlantBlock,
   isSolidBlock,
+  isTransparentBlock,
   isWaterBlock,
 } from '../world/BlockRegistry';
 import type { Chunk } from '../world/Chunk';
@@ -111,7 +112,11 @@ export class ChunkMesher {
             if (isWaterBlock(blockId) && isWaterBlock(neighborId)) {
               continue;
             }
-            if (isSolidBlock(neighborId) && !isPlantBlock(neighborId)) {
+            if (
+              isSolidBlock(neighborId) &&
+              !isPlantBlock(neighborId) &&
+              !isTransparentBlock(neighborId)
+            ) {
               continue;
             }
 

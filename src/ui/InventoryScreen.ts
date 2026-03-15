@@ -4,6 +4,7 @@ import { DEFAULT_UI_LANGUAGE, translate, type UiLanguage } from '../i18n/Languag
 import type { InventoryMessageKey } from '../i18n/messages';
 import type { InventorySlot } from '../types/player';
 import { getBlockLabel, getUiBlockColor } from '../world/BlockRegistry';
+import { createBlockSlotIconCanvas, renderBlockSlotIcon } from './BlockSlotIcon';
 import { SkinViewer } from './SkinViewer';
 
 export interface SlotInteractEvent {
@@ -112,6 +113,7 @@ export class InventoryScreen {
 
       const preview = document.createElement('div');
       preview.className = 'inventory-slot-preview';
+      preview.append(createBlockSlotIconCanvas());
       const count = document.createElement('div');
       count.className = 'inventory-slot-count';
       button.append(preview, count);
@@ -151,6 +153,7 @@ export class InventoryScreen {
     this.hoverLabel.className = 'inventory-hover';
     this.cursorGhost.className = 'inventory-cursor-ghost';
     this.cursorGhostPreview.className = 'inventory-cursor-ghost-preview';
+    this.cursorGhostPreview.append(createBlockSlotIconCanvas());
     this.cursorGhostCount.className = 'inventory-cursor-ghost-count';
     this.cursorGhost.append(this.cursorGhostPreview, this.cursorGhostCount);
 
@@ -287,9 +290,10 @@ export class InventoryScreen {
       const count = button.children[1] as HTMLDivElement;
 
       button.classList.toggle('filled', slot.blockId !== null && slot.count > 0);
-      preview.style.background = getUiBlockColor(slot.blockId);
-      preview.textContent =
-        slot.blockId === null ? '' : getBlockLabel(slot.blockId, this.language).slice(0, 1).toUpperCase();
+      const icon = preview.firstElementChild;
+      if (icon instanceof HTMLCanvasElement) {
+        renderBlockSlotIcon(icon, slot.blockId);
+      }
       count.textContent = slot.count > 0 ? String(slot.count) : '';
       count.style.display = slot.count > 0 ? '' : 'none';
     }
@@ -537,16 +541,20 @@ export class InventoryScreen {
       this.latestState.cursor.count <= 0
     ) {
       this.cursorGhost.style.visibility = 'hidden';
-      this.cursorGhostPreview.style.background = 'transparent';
-      this.cursorGhostPreview.textContent = '';
+      const icon = this.cursorGhostPreview.firstElementChild;
+      if (icon instanceof HTMLCanvasElement) {
+        renderBlockSlotIcon(icon, null);
+      }
       this.cursorGhostCount.textContent = '';
       return;
     }
 
     const { blockId, count } = this.latestState.cursor;
     this.cursorGhost.style.visibility = 'visible';
-    this.cursorGhostPreview.style.background = getUiBlockColor(blockId);
-    this.cursorGhostPreview.textContent = getBlockLabel(blockId, this.language).slice(0, 1).toUpperCase();
+    const icon = this.cursorGhostPreview.firstElementChild;
+    if (icon instanceof HTMLCanvasElement) {
+      renderBlockSlotIcon(icon, blockId);
+    }
     this.cursorGhostCount.textContent = String(count);
     this.positionCursorGhost();
   }

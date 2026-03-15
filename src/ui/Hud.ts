@@ -1,6 +1,6 @@
 import type { InventorySlot } from '../types/player';
-import { getUiBlockColor } from '../world/BlockRegistry';
 import { DEFAULT_UI_LANGUAGE, translate, type UiLanguage } from '../i18n/Language';
+import { createBlockSlotIconCanvas, renderBlockSlotIcon } from './BlockSlotIcon';
 
 export interface HotbarInteractEvent {
   index: number;
@@ -77,6 +77,7 @@ export class Hud {
 
       const preview = document.createElement('div');
       preview.className = 'slot-preview';
+      preview.append(createBlockSlotIconCanvas());
       const count = document.createElement('div');
       count.className = 'slot-count';
       count.style.display = 'none';
@@ -162,7 +163,10 @@ export class Hud {
       const count = slotElement.children[1] as HTMLDivElement;
 
       slotElement.classList.toggle('selected', index === selectedIndex);
-      preview.style.background = getUiBlockColor(slot.blockId);
+      const icon = preview.firstElementChild;
+      if (icon instanceof HTMLCanvasElement) {
+        renderBlockSlotIcon(icon, slot.blockId);
+      }
 
       if (slot.count > 0) {
         count.textContent = String(slot.count);

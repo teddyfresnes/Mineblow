@@ -66,6 +66,7 @@ interface DroppedItem {
   position: [number, number, number];
   velocity: [number, number, number];
   ageMs: number;
+  pickupDelayMs: number;
 }
 
 const EMPTY_CURSOR: InventorySlot = {
@@ -127,6 +128,7 @@ export class Game {
   private entryGateActivated = false;
   private entryGateDelayElapsed = false;
   private entryGateDismissed = false;
+  private pauseShortcutLatch = false;
   private introSplashTimeoutId: number | null = null;
   private entryGateDelayTimeoutId: number | null = null;
   private pendingWorldPreviewCapture: { worldId: string; framesRemaining: number } | null = null;
@@ -139,7 +141,7 @@ export class Game {
     this.entryGate.className = 'entry-gate';
     this.entryGateButton.type = 'button';
     this.entryGateButton.className = 'entry-gate-button';
-    this.entryGateButton.textContent = 'Cliquez pour acceder a Mineblow';
+    this.entryGateButton.textContent = 'Acceder a Mineblow';
     this.entryGateButton.disabled = true;
     this.introSplash.className = 'intro-splash';
     this.introSplashLabel.className = 'intro-splash-label';
@@ -337,7 +339,9 @@ export class Game {
   }
 
   private async startNewWorld(nameInput: string, seedInput: string): Promise<void> {
-    const seed = seedInput || `mineblow-${Date.now().toString(36)}`;
+    const seed =
+      seedInput.trim() ||
+      String(Math.floor(Math.random() * 9_000_000_000) + 1_000_000_000);
     this.renderer.clearChunks();
 
     const world = new World(seed);
@@ -488,16 +492,25 @@ export class Game {
       }
     }
 
-    const pausePressed = this.input.consumeAnyJustPressed([
+    const pauseBindings = [
       this.settings.keyBindings.pause.primary,
       this.settings.keyBindings.pause.secondary,
       'Escape',
-    ]);
+    ];
+    const pausePressed = this.input.consumeAnyJustPressed(pauseBindings);
+    if (this.pauseShortcutLatch && !this.input.isAnyKeyDown(pauseBindings)) {
+      this.pauseShortcutLatch = false;
+    }
 
     const dropPressed = this.input.consumeAnyJustPressed([
       this.settings.keyBindings.drop.primary,
       this.settings.keyBindings.drop.secondary,
     ]);
+    if (pausePressed && this.menu.isVisible()) {
+      if (!this.pauseShortcutLatch && this.menu.handleEscapeShortcut()) {
+        this.pauseShortcutLatch = true;
+      }
+    }
     if (this.inventoryScreen.isVisible() && pausePressed) {
       void this.closeInventory();
     }
@@ -527,6 +540,7 @@ export class Game {
       this.updatePauseMenuSnapshot();
       this.menu.showPause();
       this.hud.setVisible(false);
+      this.pauseShortcutLatch = true;
     }
 
     if (!this.menu.isVisible()) {
@@ -1002,7 +1016,7 @@ export class Game {
         direction.y * speed * 0.42 + 1.35 + (Math.random() - 0.5) * 0.24,
         direction.z * speed + (Math.random() - 0.5) * spread,
       ];
-      this.spawnDroppedItem(blockId, startX, startY, startZ, velocity);
+      this.spawnDroppedItem(blockId, startX, startY, startZ, velocity, DROP_PICKUP_DELAY_MS);
     }
   }
 
@@ -1210,6 +1224,7 @@ export class Game {
       this.menu.showPause();
       this.hud.setInventoryOverlayActive(false);
       this.hud.setVisible(false);
+      this.pauseShortcutLatch = true;
     }
   }
 
@@ -1245,6 +1260,7 @@ export class Game {
     y: number,
     z: number,
     initialVelocity?: [number, number, number],
+    pickupDelayMs = 0,
   ): void {
     const id = `drop-${++this.dropSequence}`;
     const velocity: [number, number, number] = initialVelocity
@@ -1260,9 +1276,10 @@ export class Game {
       position: [x, y, z],
       velocity,
       ageMs: 0,
+      pickupDelayMs,
     };
     this.droppedItems.set(id, dropped);
-    this.renderer.spawnDroppedItem(id, getUiBlockColor(blockId), x, y, z);
+    this.renderer.spawnDroppedItem(id, blockId, x, y, z);
   }
 
   private updateDroppedItems(dt: number): void {
@@ -1315,7 +1332,7 @@ export class Game {
       const dz = playerPosition[2] - item.position[2];
       const distanceSquared = dx * dx + dy * dy + dz * dz;
 
-      if (item.ageMs > DROP_PICKUP_DELAY_MS && distanceSquared < magnetRadiusSquared) {
+      if (item.ageMs > item.pickupDelayMs && distanceSquared < magnetRadiusSquared) {
         const distance = Math.max(0.0001, Math.sqrt(distanceSquared));
         const pull = Math.max(0, Math.min(1, (magnetRadius - distance) / magnetRadius));
         const pullForce = (inWater ? 5.6 : 11.5) * (0.25 + pull * 1.35);
@@ -1334,7 +1351,7 @@ export class Game {
       }
 
       if (
-        item.ageMs > DROP_PICKUP_DELAY_MS &&
+        item.ageMs > item.pickupDelayMs &&
         distanceSquared < pickupRadiusSquared &&
         inventory.addBlock(item.blockId)
       ) {
@@ -1622,7 +1639,8 @@ export class Game {
     this.entryGateActivated = true;
     this.entryGateDelayElapsed = false;
     this.entryGateButton.disabled = true;
-    this.entryGateButton.textContent = this.entryGateReady ? 'Acces...' : 'Chargement...';
+    this.entryGateButton.classList.add('text-only');
+    this.entryGateButton.textContent = this.entryGateReady ? 'Entree...' : 'Chargement...';
     if (this.settings.startFullscreen) {
       void this.requestFullscreen();
     }
