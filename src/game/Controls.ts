@@ -51,9 +51,9 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
   crouch: { primary: 'Numpad0', secondary: 'ControlLeft' },
   sprint: { primary: 'ShiftLeft', secondary: 'ShiftRight' },
   inventory: { primary: 'KeyI', secondary: 'Tab' },
-  drop: { primary: 'KeyD', secondary: 'Numpad6' },
+  drop: { primary: 'KeyT', secondary: 'Numpad6' },
   debug: { primary: 'F3', secondary: null },
-  pause: { primary: 'Escape', secondary: null },
+  pause: { primary: 'Escape', secondary: 'KeyP' },
 };
 
 export const createDefaultSettings = (): GameSettings => ({

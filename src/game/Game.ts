@@ -79,6 +79,7 @@ const INTRO_SPLASH_MIN_VISIBLE_MS = 3000;
 const INTRO_SPLASH_DURATION_MS = INTRO_SPLASH_MIN_VISIBLE_MS;
 const WORLD_PREVIEW_CAPTURE_DELAY_FRAMES = 16;
 const WORLD_PREVIEW_SIZE = 256;
+const DROP_PICKUP_DELAY_MS = 2000;
 
 export class Game {
   private readonly shell = document.createElement('div');
@@ -227,6 +228,25 @@ export class Game {
       this.saveRepository.loadGlobalStats(),
       this.saveRepository.listWorlds(),
     ]);
+
+    let migratedBindings = false;
+    if (
+      settings.keyBindings.drop.primary === 'KeyD' &&
+      settings.keyBindings.drop.secondary === 'Numpad6'
+    ) {
+      settings.keyBindings.drop.primary = 'KeyT';
+      migratedBindings = true;
+    }
+    if (
+      settings.keyBindings.pause.primary === 'Escape' &&
+      settings.keyBindings.pause.secondary === null
+    ) {
+      settings.keyBindings.pause.secondary = 'KeyP';
+      migratedBindings = true;
+    }
+    if (migratedBindings) {
+      await this.saveRepository.saveSettings(settings);
+    }
 
     this.settings = settings;
     setCurrentLanguage(this.settings.language);
@@ -595,7 +615,6 @@ export class Game {
         isMineableBlock(this.targetHit.blockId);
       this.handleInteractions(dt, canMineWithPrimary);
       this.wasPrimaryDown = primaryDown;
-      this.updateDroppedItems(dt);
       this.hud.updateHand(dt, this.movementIntensity, this.miningProgressMs > 0);
       this.renderer.updateHand(dt, this.movementIntensity, this.miningProgressMs > 0);
       this.renderer.updateSpeedFov(
@@ -617,6 +636,10 @@ export class Game {
       this.hud.updateHand(dt, 0, false);
       this.renderer.updateHand(dt, 0, false);
       this.renderer.updateSpeedFov(dt, false, false, true);
+    }
+
+    if (!this.menu.isVisible()) {
+      this.updateDroppedItems(dt);
     }
 
     this.renderer.updateTransientEffects(dt);
@@ -1292,7 +1315,7 @@ export class Game {
       const dz = playerPosition[2] - item.position[2];
       const distanceSquared = dx * dx + dy * dy + dz * dz;
 
-      if (item.ageMs > 120 && distanceSquared < magnetRadiusSquared) {
+      if (item.ageMs > DROP_PICKUP_DELAY_MS && distanceSquared < magnetRadiusSquared) {
         const distance = Math.max(0.0001, Math.sqrt(distanceSquared));
         const pull = Math.max(0, Math.min(1, (magnetRadius - distance) / magnetRadius));
         const pullForce = (inWater ? 5.6 : 11.5) * (0.25 + pull * 1.35);
@@ -1311,7 +1334,7 @@ export class Game {
       }
 
       if (
-        item.ageMs > 180 &&
+        item.ageMs > DROP_PICKUP_DELAY_MS &&
         distanceSquared < pickupRadiusSquared &&
         inventory.addBlock(item.blockId)
       ) {
