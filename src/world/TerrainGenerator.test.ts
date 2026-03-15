@@ -20,17 +20,36 @@ describe('TerrainGenerator', () => {
     expect(new Set(heights).size).toBeGreaterThan(1);
   });
 
-  it('can generate river water in some areas', () => {
+  it('always places bedrock on the last layer', () => {
     const generator = new TerrainGenerator('alpha');
-    let foundWater = false;
-
-    for (let x = -160; x <= 160 && !foundWater; x += 8) {
-      for (let z = -160; z <= 160 && !foundWater; z += 8) {
-        const surfaceY = generator.getSurfaceHeight(x, z);
-        foundWater = generator.getTerrainBlock(x, surfaceY + 1, z) === 10;
+    for (let x = -24; x <= 24; x += 6) {
+      for (let z = -24; z <= 24; z += 6) {
+        expect(generator.getTerrainBlock(x, 0, z)).toBe(6);
       }
     }
+  });
 
-    expect(foundWater).toBe(true);
+  it('generates only grass, stone and bedrock for terrain', () => {
+    const generator = new TerrainGenerator('alpha');
+    const allowed = new Set([0, 1, 3, 6]);
+
+    for (let x = -64; x <= 64; x += 8) {
+      for (let z = -64; z <= 64; z += 8) {
+        const surfaceY = generator.getSurfaceHeight(x, z);
+        for (let y = 0; y <= surfaceY + 2; y += 1) {
+          expect(allowed.has(generator.getTerrainBlock(x, y, z))).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('populates chunks with only grass, stone, bedrock, wood and leaves', () => {
+    const generator = new TerrainGenerator('alpha');
+    const chunk = generator.generateChunk({ x: 0, z: 0 });
+    const allowed = new Set([0, 1, 3, 4, 5, 6]);
+
+    for (const blockId of chunk.blocks) {
+      expect(allowed.has(blockId)).toBe(true);
+    }
   });
 });
