@@ -410,6 +410,7 @@ export class SaveRepository {
         startFullscreen: settings.startFullscreen ?? true,
         interfaceSize: normalizeInterfaceSize(settings.interfaceSize ?? DEFAULT_INTERFACE_SIZE),
         language: settings.language ?? DEFAULT_UI_LANGUAGE,
+        developerDebugMode: settings.developerDebugMode ?? false,
       };
     }
 

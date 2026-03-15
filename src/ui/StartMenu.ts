@@ -121,6 +121,7 @@ export class StartMenu {
   private readonly saveEditWorldButton = document.createElement('button');
   private readonly startupFullscreenToggleButton = document.createElement('button');
   private readonly interfaceSizeToggleButton = document.createElement('button');
+  private readonly developerDebugModeToggleButton = document.createElement('button');
   private readonly statsTitleHost = document.createElement('div');
   private readonly statsList = document.createElement('div');
   private readonly wardrobeCategorySelect = document.createElement('select');
@@ -287,6 +288,7 @@ export class StartMenu {
       startFullscreen: settings.startFullscreen,
       interfaceSize: settings.interfaceSize,
       language: settings.language,
+      developerDebugMode: settings.developerDebugMode,
     };
     const languageChanged = previousLanguage !== this.settings.language;
     this.renderBindings();
@@ -806,6 +808,7 @@ export class StartMenu {
           startFullscreen: this.settings.startFullscreen,
           interfaceSize: this.settings.interfaceSize,
           language,
+          developerDebugMode: this.settings.developerDebugMode,
         };
         this.refreshLocalizedText();
         this.handlers.onSettingsChange({
@@ -814,6 +817,7 @@ export class StartMenu {
           startFullscreen: this.settings.startFullscreen,
           interfaceSize: this.settings.interfaceSize,
           language,
+          developerDebugMode: this.settings.developerDebugMode,
         });
       });
       this.languageButtons.set(language, button);
@@ -856,6 +860,7 @@ export class StartMenu {
         startFullscreen: !this.settings.startFullscreen,
         interfaceSize: this.settings.interfaceSize,
         language: this.settings.language,
+        developerDebugMode: this.settings.developerDebugMode,
       };
       this.renderGraphicsView();
       this.handlers.onSettingsChange({
@@ -864,6 +869,7 @@ export class StartMenu {
         startFullscreen: this.settings.startFullscreen,
         interfaceSize: this.settings.interfaceSize,
         language: this.settings.language,
+        developerDebugMode: this.settings.developerDebugMode,
       });
     });
 
@@ -876,6 +882,7 @@ export class StartMenu {
         startFullscreen: this.settings.startFullscreen,
         interfaceSize: getNextInterfaceSize(this.settings.interfaceSize),
         language: this.settings.language,
+        developerDebugMode: this.settings.developerDebugMode,
       };
       this.renderGraphicsView();
       this.handlers.onSettingsChange({
@@ -884,10 +891,41 @@ export class StartMenu {
         startFullscreen: this.settings.startFullscreen,
         interfaceSize: this.settings.interfaceSize,
         language: this.settings.language,
+        developerDebugMode: this.settings.developerDebugMode,
       });
     });
 
-    stack.append(this.startupFullscreenToggleButton, this.interfaceSizeToggleButton);
+    this.developerDebugModeToggleButton.type = 'button';
+    this.developerDebugModeToggleButton.className = 'menu-button settings-compact-button';
+    this.developerDebugModeToggleButton.addEventListener('click', () => {
+      const enabling = !this.settings.developerDebugMode;
+      if (enabling && !window.confirm(this.t('developerDebugWarning'))) {
+        return;
+      }
+      this.settings = {
+        keyBindings: cloneBindings(this.settings.keyBindings),
+        skinDataUrl: this.settings.skinDataUrl,
+        startFullscreen: this.settings.startFullscreen,
+        interfaceSize: this.settings.interfaceSize,
+        language: this.settings.language,
+        developerDebugMode: enabling,
+      };
+      this.renderGraphicsView();
+      this.handlers.onSettingsChange({
+        keyBindings: cloneBindings(this.settings.keyBindings),
+        skinDataUrl: this.settings.skinDataUrl,
+        startFullscreen: this.settings.startFullscreen,
+        interfaceSize: this.settings.interfaceSize,
+        language: this.settings.language,
+        developerDebugMode: this.settings.developerDebugMode,
+      });
+    });
+
+    stack.append(
+      this.startupFullscreenToggleButton,
+      this.interfaceSizeToggleButton,
+      this.developerDebugModeToggleButton,
+    );
 
     frame.append(stack);
 
@@ -961,6 +999,7 @@ export class StartMenu {
         startFullscreen: this.settings.startFullscreen,
         interfaceSize: this.settings.interfaceSize,
         language: this.settings.language,
+        developerDebugMode: this.settings.developerDebugMode,
       };
       this.renderBindings();
       this.handlers.onSettingsChange({
@@ -969,6 +1008,7 @@ export class StartMenu {
         startFullscreen: this.settings.startFullscreen,
         interfaceSize: this.settings.interfaceSize,
         language: this.settings.language,
+        developerDebugMode: this.settings.developerDebugMode,
       });
     });
 
@@ -1382,6 +1422,9 @@ export class StartMenu {
     }`;
     const zoom = getInterfaceZoomPercent(this.settings.interfaceSize);
     this.interfaceSizeToggleButton.textContent = `${this.t('interfaceSize')}: ${this.settings.interfaceSize} (${zoom}%)`;
+    this.developerDebugModeToggleButton.textContent = `${this.t('developerDebugMode')}: ${
+      this.settings.developerDebugMode ? this.t('stateOn') : this.t('stateOff')
+    }`;
   }
 
   private renderLanguageView(): void {
@@ -2211,6 +2254,7 @@ export class StartMenu {
       startFullscreen: this.settings.startFullscreen,
       interfaceSize: this.settings.interfaceSize,
       language: this.settings.language,
+      developerDebugMode: this.settings.developerDebugMode,
     };
     this.handlers.onSettingsChange({
       keyBindings: cloneBindings(this.settings.keyBindings),
@@ -2218,6 +2262,7 @@ export class StartMenu {
       startFullscreen: this.settings.startFullscreen,
       interfaceSize: this.settings.interfaceSize,
       language: this.settings.language,
+      developerDebugMode: this.settings.developerDebugMode,
     });
   }
 
@@ -2255,6 +2300,7 @@ export class StartMenu {
       startFullscreen: this.settings.startFullscreen,
       interfaceSize: this.settings.interfaceSize,
       language: this.settings.language,
+      developerDebugMode: this.settings.developerDebugMode,
     });
   }
 

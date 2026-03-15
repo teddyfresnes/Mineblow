@@ -1,4 +1,5 @@
 type PointerLockListener = (locked: boolean) => void;
+const FUNCTION_KEY_PATTERN = /^F\d{1,2}$/;
 
 export class InputController {
   private readonly pressedKeys = new Set<string>();
@@ -136,6 +137,9 @@ export class InputController {
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
+    if (FUNCTION_KEY_PATTERN.test(event.code)) {
+      event.preventDefault();
+    }
     if (!this.pressedKeys.has(event.code)) {
       this.justPressedKeys.add(event.code);
     }

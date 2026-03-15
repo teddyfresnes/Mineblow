@@ -26,6 +26,7 @@ import {
   createEmptyGlobalStats,
   createEmptyWorldStats,
   type GlobalStats,
+  type WorldSummary,
   type WorldStats,
 } from '../types/save';
 import type { VoxelHit } from '../types/world';
@@ -129,6 +130,7 @@ export class Game {
   private entryGateDelayElapsed = false;
   private entryGateDismissed = false;
   private pauseShortcutLatch = false;
+  private resumePointerLockPending = false;
   private introSplashTimeoutId: number | null = null;
   private entryGateDelayTimeoutId: number | null = null;
   private pendingWorldPreviewCapture: { worldId: string; framesRemaining: number } | null = null;
@@ -165,6 +167,7 @@ export class Game {
 
     this.renderer = new Renderer(this.canvas);
     this.renderer.setFirstPersonHandVisible(false);
+    this.renderer.setFirstPersonHeldBlock(null);
     this.input = new InputController(this.canvas);
     this.hud = new Hud(this.shell, {
       onHotbarInteract: (event) => {
@@ -197,7 +200,7 @@ export class Game {
         void this.deleteWorld(worldId);
       },
       onResume: () => {
-        void this.resumeSession();
+        void this.resumeSession(false);
       },
       onQuitToTitle: () => {
         void this.quitToTitle();
@@ -260,6 +263,13 @@ export class Game {
     this.hud.setHandSkin(settings.skinDataUrl);
     this.hud.setLanguage(this.settings.language);
     this.inventoryScreen.setLanguage(this.settings.language);
+
+    if (this.settings.developerDebugMode) {
+      await this.startDeveloperDebugSession(worlds);
+      this.gameLoop.start();
+      return;
+    }
+
     this.entryGateReady = true;
     this.entryGateButton.disabled = false;
     if (this.entryGateActivated) {
@@ -274,6 +284,31 @@ export class Game {
     if (selectedWorldId !== undefined) {
       this.menu.setSelectedWorld(selectedWorldId);
     }
+  }
+
+  private async startDeveloperDebugSession(worlds: WorldSummary[]): Promise<void> {
+    this.entryGateDismissed = true;
+    this.entryGateActivated = true;
+    this.entryGateDelayElapsed = true;
+    this.entryGate.remove();
+    this.introSplash.remove();
+    this.menu.hide();
+    this.hud.setVisible(false);
+
+    if (this.settings.startFullscreen) {
+      void this.requestFullscreen();
+    }
+
+    const latestWorld = worlds[0] ?? null;
+    if (latestWorld) {
+      const loaded = await this.saveRepository.loadWorld(latestWorld.id);
+      if (loaded) {
+        await this.activateLoadedWorld(loaded, false);
+        return;
+      }
+    }
+
+    await this.startNewWorld('Debug World', '', false);
   }
 
   private async renameWorld(worldId: string, name: string): Promise<void> {
@@ -322,10 +357,12 @@ export class Game {
     this.primaryPunchLockMs = 0;
     this.wasPrimaryDown = false;
     this.dropSequence = 0;
+    this.resumePointerLockPending = false;
     this.droppedItems.clear();
     this.renderer.clearChunks();
     this.renderer.clearDroppedItems();
     this.renderer.setFirstPersonHandVisible(false);
+    this.renderer.setFirstPersonHeldBlock(null);
     this.renderer.setMiningOverlay(null, 0);
     this.hud.setMiningProgress(0);
     this.hud.setInventoryOverlayActive(false);
@@ -338,7 +375,11 @@ export class Game {
     void this.playMenuMusic();
   }
 
-  private async startNewWorld(nameInput: string, seedInput: string): Promise<void> {
+  private async startNewWorld(
+    nameInput: string,
+    seedInput: string,
+    openPauseOnPointerLockFailure = true,
+  ): Promise<void> {
     const seed =
       seedInput.trim() ||
       String(Math.floor(Math.random() * 9_000_000_000) + 1_000_000_000);
@@ -376,7 +417,7 @@ export class Game {
       player: new PlayerController(playerState),
       inventory,
       worldStats,
-    });
+    }, openPauseOnPointerLockFailure);
   }
 
   private async loadWorld(worldId: string): Promise<void> {
@@ -391,7 +432,10 @@ export class Game {
     await this.activateLoadedWorld(loaded);
   }
 
-  private async activateLoadedWorld(loaded: LoadedWorld): Promise<void> {
+  private async activateLoadedWorld(
+    loaded: LoadedWorld,
+    openPauseOnPointerLockFailure = true,
+  ): Promise<void> {
     const world = new World(loaded.save.seed, loaded.chunkDiffs);
     world.primeAround(loaded.save.player.position[0], loaded.save.player.position[2], 1);
     world.primeAround(0, 0, 1);
@@ -407,10 +451,13 @@ export class Game {
       player: new PlayerController(playerState),
       inventory,
       worldStats,
-    });
+    }, openPauseOnPointerLockFailure);
   }
 
-  private async activateSession(session: Session): Promise<void> {
+  private async activateSession(
+    session: Session,
+    openPauseOnPointerLockFailure = true,
+  ): Promise<void> {
     this.session = session;
     this.updateCanvasVisibility();
     this.stopMenuMusic();
@@ -454,18 +501,35 @@ export class Game {
     );
     this.hud.setGenerating(session.world.hasPendingGeneration() || session.world.hasPendingMeshes());
     this.queueWorldPreviewCapture(session.id);
-    await this.resumeSession();
+    await this.resumeSession(openPauseOnPointerLockFailure);
   }
 
-  private async resumeSession(): Promise<void> {
+  private async resumeSession(openPauseOnPointerLockFailure = true): Promise<void> {
     this.hud.setInventoryOverlayActive(false);
     this.hud.setVisible(true);
     this.menu.hide();
+    this.resumePointerLockPending = true;
     try {
       await this.input.requestPointerLock();
+      if (!this.input.isPointerLocked()) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 0);
+        });
+      }
     } catch {
+      // Pointer lock can fail if the browser blocks the request.
+    } finally {
+      this.resumePointerLockPending = false;
+    }
+
+    if (this.input.isPointerLocked()) {
+      return;
+    }
+
+    if (openPauseOnPointerLockFailure) {
       this.updatePauseMenuSnapshot();
       this.menu.showPause();
+      this.hud.setVisible(false);
     }
   }
 
@@ -502,18 +566,22 @@ export class Game {
       this.pauseShortcutLatch = false;
     }
 
+    let handledPauseShortcut = false;
+    if (pausePressed && this.menu.isVisible()) {
+      handledPauseShortcut = true;
+      if (!this.pauseShortcutLatch && this.menu.handleEscapeShortcut()) {
+        this.pauseShortcutLatch = true;
+      }
+    } else if (pausePressed && this.inventoryScreen.isVisible()) {
+      handledPauseShortcut = true;
+      this.pauseShortcutLatch = true;
+      void this.closeInventory(false);
+    }
+
     const dropPressed = this.input.consumeAnyJustPressed([
       this.settings.keyBindings.drop.primary,
       this.settings.keyBindings.drop.secondary,
     ]);
-    if (pausePressed && this.menu.isVisible()) {
-      if (!this.pauseShortcutLatch && this.menu.handleEscapeShortcut()) {
-        this.pauseShortcutLatch = true;
-      }
-    }
-    if (this.inventoryScreen.isVisible() && pausePressed) {
-      void this.closeInventory();
-    }
 
     if (!this.session) {
       this.input.endFrame();
@@ -532,6 +600,7 @@ export class Game {
 
     if (
       pausePressed &&
+      !handledPauseShortcut &&
       this.input.isPointerLocked() &&
       !this.inventoryScreen.isVisible() &&
       !this.menu.isVisible()
@@ -638,7 +707,20 @@ export class Game {
         player.isGrounded(),
       );
     } else {
-      this.input.consumePrimaryClick();
+      if (
+        !this.menu.isVisible() &&
+        !this.inventoryScreen.isVisible() &&
+        !this.input.isPointerLocked()
+      ) {
+        const relockRequested =
+          this.input.consumePrimaryClick() || this.input.consumeSecondaryClick();
+        if (relockRequested) {
+          void this.resumeSession(false);
+        }
+      } else {
+        this.input.consumePrimaryClick();
+        this.input.consumeSecondaryClick();
+      }
       this.primaryHoldMs = 0;
       this.primaryPunchPending = false;
       this.primaryPunchLockMs = 0;
@@ -842,7 +924,12 @@ export class Game {
       this.renderer.setMiningOverlay(null, 0);
     }
 
-    if (this.targetHit && this.input.consumeSecondaryClick()) {
+    const secondaryClicked = this.input.consumeSecondaryClick();
+    if (secondaryClicked) {
+      this.renderer.triggerFirstPersonAction(1.05);
+    }
+
+    if (this.targetHit && secondaryClicked) {
       if (this.targetHit.blockId === 8) {
         this.openInventory('crafting_table');
         return;
@@ -891,7 +978,7 @@ export class Game {
     this.refreshInventoryScreen();
   }
 
-  private async closeInventory(): Promise<void> {
+  private async closeInventory(openPauseOnPointerLockFailure = true): Promise<void> {
     if (!this.session) {
       return;
     }
@@ -905,7 +992,7 @@ export class Game {
     this.inventoryScreen.setVisible(false);
     this.hud.setInventoryOverlayActive(false);
     await this.persistProfile(true);
-    await this.resumeSession();
+    await this.resumeSession(openPauseOnPointerLockFailure);
   }
 
   private refreshInventoryScreen(): void {
@@ -1141,9 +1228,14 @@ export class Game {
 
   private updateFirstPersonHandVisibility(inventory: Inventory): void {
     const selectedSlot = inventory.getSlot(inventory.getSelectedAbsoluteSlotIndex());
-    const visible = selectedSlot.blockId === null || selectedSlot.count <= 0;
-    this.renderer.setFirstPersonAnimationPreset(visible ? 'hand' : 'item');
-    this.renderer.setFirstPersonHandVisible(visible);
+    const hasHeldBlock = selectedSlot.blockId !== null && selectedSlot.count > 0;
+    const firstPersonVisible =
+      this.input.isPointerLocked() && !this.menu.isVisible() && !this.inventoryScreen.isVisible();
+    this.renderer.setFirstPersonAnimationPreset(hasHeldBlock ? 'item' : 'hand');
+    this.renderer.setFirstPersonHandVisible(firstPersonVisible);
+    this.renderer.setFirstPersonHeldBlock(
+      firstPersonVisible && hasHeldBlock ? selectedSlot.blockId : null,
+    );
   }
 
   private createSafePlayerState(candidate: PlayerState, world: World): PlayerState {
@@ -1207,10 +1299,15 @@ export class Game {
     }
 
     if (locked) {
+      this.resumePointerLockPending = false;
       this.menu.hide();
       if (!this.inventoryScreen.isVisible()) {
         this.hud.setVisible(true);
       }
+      return;
+    }
+
+    if (this.resumePointerLockPending) {
       return;
     }
 
@@ -1437,6 +1534,7 @@ export class Game {
       startFullscreen: settings.startFullscreen,
       interfaceSize: normalizeInterfaceSize(settings.interfaceSize),
       language: settings.language,
+      developerDebugMode: settings.developerDebugMode,
     };
     setCurrentLanguage(this.settings.language);
     this.applyInterfaceZoom(this.settings.interfaceSize);

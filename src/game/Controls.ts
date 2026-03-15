@@ -30,6 +30,7 @@ export interface GameSettings {
   startFullscreen: boolean;
   interfaceSize: number;
   language: UiLanguage;
+  developerDebugMode: boolean;
 }
 
 export const DEFAULT_INTERFACE_SIZE = 5;
@@ -62,6 +63,7 @@ export const createDefaultSettings = (): GameSettings => ({
   startFullscreen: true,
   interfaceSize: DEFAULT_INTERFACE_SIZE,
   language: DEFAULT_UI_LANGUAGE,
+  developerDebugMode: false,
 });
 
 export const normalizeInterfaceSize = (value: number): number => {

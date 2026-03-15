@@ -229,7 +229,7 @@ export class ChunkMesher {
     }
     if (face === 'bottom') {
       return atlas.getTileRect(
-        definition.textureBottom ?? definition.textureSide ?? definition.textureTop ?? 'dirt',
+        definition.textureBottom ?? definition.textureSide ?? 'dirt',
       );
     }
     return atlas.getTileRect(definition.textureSide ?? definition.textureTop ?? 'dirt');

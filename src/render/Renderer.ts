@@ -39,6 +39,13 @@ const HAND_BASE_ROT_Z = -0.09;
 const HAND_BASE_SCALE = 1.15;
 const HAND_OVERLAY_NEAR = 0.01;
 const HAND_OVERLAY_FAR = 12;
+const HELD_ITEM_EDGE_SIZE = 0.78;
+const HELD_ITEM_POS_X = 0.05;
+const HELD_ITEM_POS_Y = -0.18;
+const HELD_ITEM_POS_Z = 0.28;
+const HELD_ITEM_ROT_X = 0.86;
+const HELD_ITEM_ROT_Y = -0.52;
+const HELD_ITEM_ROT_Z = 0.18;
 
 export type FirstPersonAnimationPreset = 'hand' | 'item';
 
@@ -116,7 +123,10 @@ export class Renderer {
   private readonly lights: SceneLights;
   private readonly miningOverlay: Mesh;
   private readonly handRig = new Group();
+  private readonly heldItemAnchor = new Group();
   private handModel: Group | null = null;
+  private heldItemMesh: Mesh | null = null;
+  private heldBlockId: BlockId | null = null;
   private handPhase = 0;
   private miningPhase = 0;
   private miningBlend = 0;
@@ -156,6 +166,8 @@ export class Renderer {
     this.handRig.position.set(HAND_BASE_X, HAND_BASE_Y, HAND_BASE_Z);
     this.handRig.rotation.set(HAND_BASE_ROT_X, HAND_BASE_ROT_Y, HAND_BASE_ROT_Z);
     this.handRig.scale.set(HAND_BASE_SCALE, HAND_BASE_SCALE, HAND_BASE_SCALE);
+    this.heldItemAnchor.position.set(HELD_ITEM_POS_X, HELD_ITEM_POS_Y, HELD_ITEM_POS_Z);
+    this.handRig.add(this.heldItemAnchor);
     const handAmbient = new AmbientLight('#ffffff', 0.6);
     const handKey = new DirectionalLight('#fff2db', 0.95);
     handKey.position.set(1.6, 2.2, 2.1);
@@ -254,6 +266,39 @@ export class Renderer {
 
   setFirstPersonHandVisible(visible: boolean): void {
     this.handRig.visible = visible;
+  }
+
+  setFirstPersonHeldBlock(blockId: BlockId | null): void {
+    if (this.heldBlockId === blockId) {
+      return;
+    }
+
+    this.heldBlockId = blockId;
+    this.clearHeldItemMesh();
+
+    if (blockId === null) {
+      if (this.handModel) {
+        this.handModel.visible = true;
+      }
+      return;
+    }
+
+    const mesh = new Mesh(
+      this.createBlockGeometry(blockId, HELD_ITEM_EDGE_SIZE),
+      new MeshLambertMaterial({
+        map: this.atlas.material.map,
+        transparent: true,
+        alphaTest: 0.25,
+      }),
+    );
+    mesh.rotation.set(HELD_ITEM_ROT_X, HELD_ITEM_ROT_Y, HELD_ITEM_ROT_Z);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    this.heldItemAnchor.add(mesh);
+    this.heldItemMesh = mesh;
+    if (this.handModel) {
+      this.handModel.visible = false;
+    }
   }
 
   setFirstPersonAnimationPreset(preset: FirstPersonAnimationPreset): void {
@@ -528,10 +573,29 @@ export class Renderer {
 
     this.handModel = createFirstPersonHand(skin.texture, skin.model);
     this.handRig.add(this.handModel);
+    this.handModel.visible = this.heldBlockId === null;
   }
 
   private createDroppedItemGeometry(blockId: BlockId): BoxGeometry {
-    const geometry = new BoxGeometry(0.26, 0.26, 0.26);
+    return this.createBlockGeometry(blockId, 0.26);
+  }
+
+  private clearHeldItemMesh(): void {
+    if (!this.heldItemMesh) {
+      return;
+    }
+
+    this.heldItemAnchor.remove(this.heldItemMesh);
+    this.heldItemMesh.geometry.dispose();
+    const material = this.heldItemMesh.material;
+    if (material instanceof MeshLambertMaterial) {
+      material.dispose();
+    }
+    this.heldItemMesh = null;
+  }
+
+  private createBlockGeometry(blockId: BlockId, edgeSize: number): BoxGeometry {
+    const geometry = new BoxGeometry(edgeSize, edgeSize, edgeSize);
     const uv = geometry.getAttribute('uv');
     if (!(uv instanceof BufferAttribute)) {
       return geometry;
@@ -541,16 +605,19 @@ export class Renderer {
     const topRect = this.atlas.getTileRect(definition.textureTop ?? definition.textureSide ?? 'dirt');
     const sideRect = this.atlas.getTileRect(definition.textureSide ?? definition.textureTop ?? 'dirt');
     const bottomRect = this.atlas.getTileRect(
-      definition.textureBottom ?? definition.textureSide ?? definition.textureTop ?? 'dirt',
+      definition.textureBottom ?? definition.textureSide ?? 'dirt',
     );
     const faces = [sideRect, sideRect, topRect, bottomRect, sideRect, sideRect] as const;
 
     faces.forEach((rect, faceIndex) => {
+      const isSideFace = faceIndex === 0 || faceIndex === 1 || faceIndex === 4 || faceIndex === 5;
+      const vTop = isSideFace ? rect.v1 : rect.v0;
+      const vBottom = isSideFace ? rect.v0 : rect.v1;
       const vertexOffset = faceIndex * 4;
-      uv.setXY(vertexOffset, rect.u0, rect.v1);
-      uv.setXY(vertexOffset + 1, rect.u1, rect.v1);
-      uv.setXY(vertexOffset + 2, rect.u0, rect.v0);
-      uv.setXY(vertexOffset + 3, rect.u1, rect.v0);
+      uv.setXY(vertexOffset, rect.u0, vBottom);
+      uv.setXY(vertexOffset + 1, rect.u1, vBottom);
+      uv.setXY(vertexOffset + 2, rect.u0, vTop);
+      uv.setXY(vertexOffset + 3, rect.u1, vTop);
     });
     uv.needsUpdate = true;
     return geometry;

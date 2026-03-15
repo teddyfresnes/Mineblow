@@ -199,7 +199,9 @@ export const isStoredSettings = (value: unknown): value is StoredSettings => {
     isStringOrNull(candidate.skinDataUrl) &&
     (typeof candidate.startFullscreen === 'boolean' || typeof candidate.startFullscreen === 'undefined') &&
     (typeof candidate.interfaceSize === 'undefined' || isInterfaceSize(candidate.interfaceSize)) &&
-    (typeof candidate.language === 'undefined' || isUiLanguage(candidate.language))
+    (typeof candidate.language === 'undefined' || isUiLanguage(candidate.language)) &&
+    (typeof candidate.developerDebugMode === 'boolean' ||
+      typeof candidate.developerDebugMode === 'undefined')
   );
 };
 

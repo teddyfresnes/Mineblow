@@ -33,6 +33,9 @@ const fr = {
     graphicsTitle: 'Options graphiques',
     fullscreen: 'Plein ecran au demarrage',
     interfaceSize: 'Taille interface',
+    developerDebugMode: 'Mode debug developpeur',
+    developerDebugWarning:
+      'Le mode debug saute le menu et charge automatiquement le dernier monde a chaque lancement. Continuer ?',
     stateOn: 'ON',
     stateOff: 'OFF',
     keybindingsTitle: 'Touches',
@@ -213,6 +216,9 @@ const en: MessageCatalog = {
     graphicsTitle: 'Graphics Options',
     fullscreen: 'Fullscreen at startup',
     interfaceSize: 'Interface Size',
+    developerDebugMode: 'Developer Debug Mode',
+    developerDebugWarning:
+      'Debug mode skips loading/menu screens and auto-joins the most recent world on each launch. Continue?',
     stateOn: 'ON',
     stateOff: 'OFF',
     keybindingsTitle: 'Key Bindings',
