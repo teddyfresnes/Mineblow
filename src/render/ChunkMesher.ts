@@ -96,6 +96,8 @@ export class ChunkMesher {
           if (blockId === 0) {
             continue;
           }
+          const blockDefinition = getBlockDefinition(blockId);
+          const renderDoubleSided = blockDefinition.key === 'leaves';
 
           if (isPlantBlock(blockId)) {
             const textureRect = ChunkMesher.getFaceTextureRect(blockId, 'side', atlas);
@@ -127,13 +129,23 @@ export class ChunkMesher {
               [textureRect.u1, textureRect.v0],
               [textureRect.u1, textureRect.v1],
             ] as const;
-            const triangles = [0, 1, 2, 0, 2, 3];
+            const frontTriangles = [0, 1, 2, 0, 2, 3];
+            const backTriangles = [0, 2, 1, 0, 3, 2];
 
-            for (const triangleIndex of triangles) {
+            for (const triangleIndex of frontTriangles) {
               const [cx, cy, cz] = face.corners[triangleIndex];
               positions.push(x + cx, y + cy, z + cz);
               normals.push(...face.normal);
               uvs.push(...faceUvs[triangleIndex]);
+            }
+
+            if (renderDoubleSided) {
+              for (const triangleIndex of backTriangles) {
+                const [cx, cy, cz] = face.corners[triangleIndex];
+                positions.push(x + cx, y + cy, z + cz);
+                normals.push(-face.normal[0], -face.normal[1], -face.normal[2]);
+                uvs.push(...faceUvs[triangleIndex]);
+              }
             }
           }
         }

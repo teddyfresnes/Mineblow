@@ -189,7 +189,7 @@ export const isStoredSettings = (value: unknown): value is StoredSettings => {
     return (
       binding &&
       typeof binding === 'object' &&
-      typeof binding.primary === 'string' &&
+      isStringOrNull(binding.primary) &&
       isStringOrNull(binding.secondary)
     );
   });

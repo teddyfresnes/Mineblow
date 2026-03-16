@@ -260,7 +260,9 @@ export class StartMenu {
       this.wardrobeImportInput.value = '';
     });
     this.handleKeyCapture = this.handleKeyCapture.bind(this);
+    this.handleMenuNavigationKey = this.handleMenuNavigationKey.bind(this);
     window.addEventListener('keydown', this.handleKeyCapture);
+    window.addEventListener('keydown', this.handleMenuNavigationKey);
 
     this.renderBindings();
     this.syncSkinSelectionFromSettings();
@@ -1253,6 +1255,9 @@ export class StartMenu {
       this.alignHomeToViewportCenter();
     }
     this.updateMenuRenderActivity();
+    if (this.isVisible()) {
+      this.focusFirstInteractiveElement();
+    }
   }
 
   private applySurfaceForScreen(screen: MenuScreen): void {
@@ -2278,19 +2283,14 @@ export class StartMenu {
 
     event.preventDefault();
     const { action, slot } = this.listeningBinding;
+    const clearBinding = event.code === 'Escape' || event.code === 'Backspace' || event.code === 'Delete';
     if (event.code === 'Escape') {
       this.skipNextEscapeShortcut = true;
-      this.listeningBinding = null;
-      this.renderBindings();
-      return;
     }
-
-    if (slot === 'secondary' && (event.code === 'Backspace' || event.code === 'Delete')) {
-      this.settings.keyBindings[action].secondary = null;
-    } else if (slot === 'primary') {
-      this.settings.keyBindings[action].primary = event.code;
+    if (clearBinding) {
+      this.settings.keyBindings[action][slot] = null;
     } else {
-      this.settings.keyBindings[action].secondary = event.code;
+      this.settings.keyBindings[action][slot] = event.code;
     }
     this.listeningBinding = null;
     this.renderBindings();
@@ -2302,6 +2302,115 @@ export class StartMenu {
       language: this.settings.language,
       developerDebugMode: this.settings.developerDebugMode,
     });
+  }
+
+  private handleMenuNavigationKey(event: KeyboardEvent): void {
+    if (!this.isVisible() || this.listeningBinding) {
+      return;
+    }
+    if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey) {
+      return;
+    }
+
+    const code = event.code;
+    const isArrow =
+      code === 'ArrowUp' ||
+      code === 'ArrowDown' ||
+      code === 'ArrowLeft' ||
+      code === 'ArrowRight';
+    const isEnter = code === 'Enter' || code === 'NumpadEnter';
+    if (!isArrow && !isEnter) {
+      return;
+    }
+
+    const activeElement = document.activeElement as HTMLElement | null;
+    if (isArrow && this.isTextInput(activeElement)) {
+      return;
+    }
+
+    const focusables = this.getCurrentScreenFocusables();
+    if (focusables.length === 0) {
+      return;
+    }
+
+    if (isEnter) {
+      if (!activeElement || !focusables.includes(activeElement)) {
+        focusables[0].focus();
+        event.preventDefault();
+        return;
+      }
+
+      if (
+        activeElement instanceof HTMLButtonElement ||
+        (activeElement instanceof HTMLInputElement &&
+          (activeElement.type === 'button' ||
+            activeElement.type === 'submit' ||
+            activeElement.type === 'checkbox' ||
+            activeElement.type === 'radio'))
+      ) {
+        activeElement.click();
+        event.preventDefault();
+      }
+      return;
+    }
+
+    const moveBackward = code === 'ArrowUp' || code === 'ArrowLeft';
+    const currentIndex = activeElement ? focusables.indexOf(activeElement) : -1;
+    const nextIndex =
+      currentIndex === -1
+        ? 0
+        : (currentIndex + (moveBackward ? -1 : 1) + focusables.length) % focusables.length;
+    focusables[nextIndex].focus();
+    event.preventDefault();
+  }
+
+  private focusFirstInteractiveElement(): void {
+    const activeElement = document.activeElement as HTMLElement | null;
+    if (activeElement && this.views.get(this.currentScreen)?.contains(activeElement)) {
+      return;
+    }
+
+    const focusables = this.getCurrentScreenFocusables();
+    focusables[0]?.focus();
+  }
+
+  private getCurrentScreenFocusables(): HTMLElement[] {
+    const currentView = this.views.get(this.currentScreen);
+    if (!currentView) {
+      return [];
+    }
+
+    const selector =
+      'button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    return Array.from(currentView.querySelectorAll<HTMLElement>(selector)).filter((element) => {
+      if (element.tabIndex < 0 || element.getAttribute('aria-hidden') === 'true') {
+        return false;
+      }
+      return element.offsetParent !== null;
+    });
+  }
+
+  private isTextInput(element: HTMLElement | null): boolean {
+    if (!element) {
+      return false;
+    }
+
+    if (element instanceof HTMLTextAreaElement) {
+      return true;
+    }
+
+    if (element instanceof HTMLInputElement) {
+      return (
+        element.type === 'text' ||
+        element.type === 'search' ||
+        element.type === 'password' ||
+        element.type === 'email' ||
+        element.type === 'url' ||
+        element.type === 'number'
+      );
+    }
+
+    return element.isContentEditable;
   }
 
   private renderBindings(): void {

@@ -14,6 +14,7 @@ interface HudHandlers {
 
 export class Hud {
   private readonly root = document.createElement('div');
+  private readonly pointerUnlockPrompt = document.createElement('div');
   private readonly crosshair = document.createElement('div');
   private readonly generationLabel = document.createElement('div');
   private readonly fpsLabel = document.createElement('div');
@@ -27,6 +28,8 @@ export class Hud {
 
   constructor(parent: HTMLElement, private readonly handlers: HudHandlers = {}) {
     this.root.className = 'hud-layer';
+    this.pointerUnlockPrompt.className = 'pointer-unlock-prompt';
+    this.pointerUnlockPrompt.textContent = translate('hud.pointerUnlockPrompt', {}, this.language);
 
     this.crosshair.className = 'crosshair';
     this.generationLabel.className = 'generation-label';
@@ -88,6 +91,7 @@ export class Hud {
     }
 
     this.root.append(
+      this.pointerUnlockPrompt,
       this.crosshair,
       this.generationLabel,
       this.fpsLabel,
@@ -110,6 +114,11 @@ export class Hud {
   setLanguage(language: UiLanguage): void {
     this.language = language;
     this.generationLabel.textContent = translate('hud.generating', {}, this.language);
+    this.pointerUnlockPrompt.textContent = translate('hud.pointerUnlockPrompt', {}, this.language);
+  }
+
+  setPointerUnlockPromptVisible(visible: boolean): void {
+    this.pointerUnlockPrompt.classList.toggle('visible', visible);
   }
 
   setTargetLabel(label: string | null): void {

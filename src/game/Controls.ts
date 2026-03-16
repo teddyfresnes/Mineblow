@@ -18,7 +18,7 @@ export const CONTROL_ACTIONS = [
 export type ControlAction = (typeof CONTROL_ACTIONS)[number];
 
 export interface KeyBinding {
-  primary: string;
+  primary: string | null;
   secondary: string | null;
 }
 
@@ -54,7 +54,7 @@ export const DEFAULT_KEY_BINDINGS: KeyBindings = {
   inventory: { primary: 'KeyI', secondary: 'Tab' },
   drop: { primary: 'KeyT', secondary: 'Numpad6' },
   debug: { primary: 'F3', secondary: null },
-  pause: { primary: 'Escape', secondary: 'KeyP' },
+  pause: { primary: 'KeyP', secondary: null },
 };
 
 export const createDefaultSettings = (): GameSettings => ({

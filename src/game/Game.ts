@@ -82,6 +82,7 @@ const INTRO_SPLASH_DURATION_MS = INTRO_SPLASH_MIN_VISIBLE_MS;
 const WORLD_PREVIEW_CAPTURE_DELAY_FRAMES = 16;
 const WORLD_PREVIEW_SIZE = 256;
 const DROP_PICKUP_DELAY_MS = 2000;
+const PAUSE_MENU_KEY = 'KeyP';
 
 export class Game {
   private readonly shell = document.createElement('div');
@@ -214,6 +215,7 @@ export class Game {
     this.handleResize = this.handleResize.bind(this);
     this.handleBeforeUnload = this.handleBeforeUnload.bind(this);
     this.handlePointerLockChange = this.handlePointerLockChange.bind(this);
+    this.handleEscapeKeyDown = this.handleEscapeKeyDown.bind(this);
     setCurrentLanguage(this.settings.language);
     this.hud.setLanguage(this.settings.language);
     this.inventoryScreen.setLanguage(this.settings.language);
@@ -222,6 +224,7 @@ export class Game {
   async bootstrap(): Promise<void> {
     this.input.connect();
     this.input.setPointerLockListener(this.handlePointerLockChange);
+    window.addEventListener('keydown', this.handleEscapeKeyDown);
     this.hud.setVisible(false);
     this.updateCanvasVisibility();
     this.handleResize();
@@ -242,11 +245,9 @@ export class Game {
       settings.keyBindings.drop.primary = 'KeyT';
       migratedBindings = true;
     }
-    if (
-      settings.keyBindings.pause.primary === 'Escape' &&
-      settings.keyBindings.pause.secondary === null
-    ) {
-      settings.keyBindings.pause.secondary = 'KeyP';
+    if (settings.keyBindings.pause.primary !== PAUSE_MENU_KEY || settings.keyBindings.pause.secondary !== null) {
+      settings.keyBindings.pause.primary = PAUSE_MENU_KEY;
+      settings.keyBindings.pause.secondary = null;
       migratedBindings = true;
     }
     if (migratedBindings) {
@@ -556,11 +557,7 @@ export class Game {
       }
     }
 
-    const pauseBindings = [
-      this.settings.keyBindings.pause.primary,
-      this.settings.keyBindings.pause.secondary,
-      'Escape',
-    ];
+    const pauseBindings = [PAUSE_MENU_KEY];
     const pausePressed = this.input.consumeAnyJustPressed(pauseBindings);
     if (this.pauseShortcutLatch && !this.input.isAnyKeyDown(pauseBindings)) {
       this.pauseShortcutLatch = false;
@@ -569,7 +566,7 @@ export class Game {
     let handledPauseShortcut = false;
     if (pausePressed && this.menu.isVisible()) {
       handledPauseShortcut = true;
-      if (!this.pauseShortcutLatch && this.menu.handleEscapeShortcut()) {
+      if (this.menu.handleEscapeShortcut()) {
         this.pauseShortcutLatch = true;
       }
     } else if (pausePressed && this.inventoryScreen.isVisible()) {
@@ -584,6 +581,7 @@ export class Game {
     ]);
 
     if (!this.session) {
+      this.hud.setPointerUnlockPromptVisible(false);
       this.input.endFrame();
       return;
     }
@@ -601,11 +599,12 @@ export class Game {
     if (
       pausePressed &&
       !handledPauseShortcut &&
-      this.input.isPointerLocked() &&
       !this.inventoryScreen.isVisible() &&
       !this.menu.isVisible()
     ) {
-      this.input.exitPointerLock();
+      if (this.input.isPointerLocked()) {
+        this.input.exitPointerLock();
+      }
       this.updatePauseMenuSnapshot();
       this.menu.showPause();
       this.hud.setVisible(false);
@@ -769,6 +768,7 @@ export class Game {
 
     const [playerX, playerY, playerZ] = player.getPosition();
     this.updateDebugPanel(playerX, playerY, playerZ);
+    this.updatePointerUnlockPromptVisibility();
     this.input.endFrame();
   }
 
@@ -925,9 +925,6 @@ export class Game {
     }
 
     const secondaryClicked = this.input.consumeSecondaryClick();
-    if (secondaryClicked) {
-      this.renderer.triggerFirstPersonAction(1.05);
-    }
 
     if (this.targetHit && secondaryClicked) {
       if (this.targetHit.blockId === 8) {
@@ -956,6 +953,7 @@ export class Game {
           selectedBlock,
         )
       ) {
+        this.renderer.triggerFirstPersonAction(1.05);
         inventory.consumeSelectedBlock();
         this.session.worldStats.blocksPlaced += 1;
         this.globalStats.totalBlocksPlaced += 1;
@@ -978,7 +976,10 @@ export class Game {
     this.refreshInventoryScreen();
   }
 
-  private async closeInventory(openPauseOnPointerLockFailure = true): Promise<void> {
+  private async closeInventory(
+    openPauseOnPointerLockFailure = true,
+    preferImmediateResume = false,
+  ): Promise<void> {
     if (!this.session) {
       return;
     }
@@ -991,6 +992,13 @@ export class Game {
 
     this.inventoryScreen.setVisible(false);
     this.hud.setInventoryOverlayActive(false);
+    if (preferImmediateResume) {
+      const persistPromise = this.persistProfile(true);
+      await this.resumeSession(openPauseOnPointerLockFailure);
+      await persistPromise;
+      return;
+    }
+
     await this.persistProfile(true);
     await this.resumeSession(openPauseOnPointerLockFailure);
   }
@@ -1293,6 +1301,15 @@ export class Game {
     this.renderer.resize(window.innerWidth, window.innerHeight);
   }
 
+  private updatePointerUnlockPromptVisibility(): void {
+    const showPrompt =
+      !!this.session &&
+      !this.menu.isVisible() &&
+      !this.inventoryScreen.isVisible() &&
+      !this.input.isPointerLocked();
+    this.hud.setPointerUnlockPromptVisible(showPrompt);
+  }
+
   private handlePointerLockChange(locked: boolean): void {
     if (!this.session) {
       return;
@@ -1304,24 +1321,44 @@ export class Game {
       if (!this.inventoryScreen.isVisible()) {
         this.hud.setVisible(true);
       }
+      this.updatePointerUnlockPromptVisibility();
       return;
     }
 
     if (this.resumePointerLockPending) {
+      this.hud.setPointerUnlockPromptVisible(false);
+      return;
+    }
+
+    if (!this.menu.isVisible() && !this.inventoryScreen.isVisible()) {
+      this.hud.setVisible(true);
+      this.hud.setInventoryOverlayActive(false);
+    }
+    this.updatePointerUnlockPromptVisibility();
+  }
+
+  private handleEscapeKeyDown(event: KeyboardEvent): void {
+    if (event.code !== 'Escape' || event.repeat || !this.session) {
       return;
     }
 
     if (this.inventoryScreen.isVisible()) {
+      event.preventDefault();
+      this.pauseShortcutLatch = true;
+      this.input.consumeJustPressedKey('Escape');
+      void this.closeInventory(false, true);
       return;
     }
 
     if (!this.menu.isVisible()) {
-      this.menu.setGlobalStats(this.globalStats);
-      this.updatePauseMenuSnapshot();
-      this.menu.showPause();
-      this.hud.setInventoryOverlayActive(false);
-      this.hud.setVisible(false);
+      this.hud.setPointerUnlockPromptVisible(true);
+      return;
+    }
+
+    event.preventDefault();
+    if (this.menu.handleEscapeShortcut()) {
       this.pauseShortcutLatch = true;
+      this.input.consumeJustPressedKey('Escape');
     }
   }
 
@@ -1528,8 +1565,11 @@ export class Game {
   }
 
   private applySettings(settings: GameSettings): void {
+    const keyBindings = cloneBindings(settings.keyBindings);
+    keyBindings.pause.primary = PAUSE_MENU_KEY;
+    keyBindings.pause.secondary = null;
     this.settings = {
-      keyBindings: cloneBindings(settings.keyBindings),
+      keyBindings,
       skinDataUrl: settings.skinDataUrl,
       startFullscreen: settings.startFullscreen,
       interfaceSize: normalizeInterfaceSize(settings.interfaceSize),

@@ -106,6 +106,7 @@ const fr = {
   },
   hud: {
     generating: 'Generation...',
+    pointerUnlockPrompt: 'Cliquez pour revenir dans le jeu, appuyez sur P pour ouvrir le menu pause',
   },
   controls: {
     unbound: 'Non assigne',
@@ -289,6 +290,7 @@ const en: MessageCatalog = {
   },
   hud: {
     generating: 'Generating...',
+    pointerUnlockPrompt: 'Click to return to the game, press P to open the pause menu',
   },
   controls: {
     unbound: 'Unbound',
