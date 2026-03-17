@@ -122,6 +122,7 @@ export class Hud {
 
   setPointerUnlockPromptVisible(visible: boolean): void {
     this.pointerUnlockPrompt.classList.toggle('visible', visible);
+    this.root.classList.toggle('pointer-unlock-active', visible);
     document.body.classList.toggle('pointer-cursor-hidden', visible);
   }
 
