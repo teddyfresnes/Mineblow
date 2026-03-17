@@ -549,6 +549,11 @@
   display: flex;
 }
 
+body.pointer-cursor-hidden,
+body.pointer-cursor-hidden * {
+  cursor: none !important;
+}
+
 .hotbar {
   position: absolute;
   left: 50%;

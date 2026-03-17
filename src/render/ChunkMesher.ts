@@ -111,6 +111,9 @@ export class ChunkMesher {
               y + face.normal[1],
               originZ + z + face.normal[2],
             );
+            if (neighborId === blockId) {
+              continue;
+            }
             if (isWaterBlock(blockId) && isWaterBlock(neighborId)) {
               continue;
             }

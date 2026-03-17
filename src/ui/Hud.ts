@@ -104,6 +104,9 @@ export class Hud {
   }
 
   setVisible(visible: boolean): void {
+    if (!visible) {
+      this.setPointerUnlockPromptVisible(false);
+    }
     this.root.style.display = visible ? '' : 'none';
   }
 
@@ -119,6 +122,7 @@ export class Hud {
 
   setPointerUnlockPromptVisible(visible: boolean): void {
     this.pointerUnlockPrompt.classList.toggle('visible', visible);
+    document.body.classList.toggle('pointer-cursor-hidden', visible);
   }
 
   setTargetLabel(label: string | null): void {
