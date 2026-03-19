@@ -165,6 +165,16 @@ const fr = {
     mud: 'Boue',
     grass_plant: 'Hautes herbes',
     flower_red: 'Fleur rouge',
+    gravel: 'Gravier',
+    sandstone: 'Gres',
+    coal_ore: 'Minerai de charbon',
+    iron_ore: 'Minerai de fer',
+    gold_ore: 'Minerai d or',
+    redstone_ore: 'Minerai de redstone',
+    diamond_ore: 'Minerai de diamant',
+    lapis_ore: 'Minerai de lapis',
+    snow: 'Neige',
+    ice: 'Glace',
   },
   recipes: {
     planks: {
@@ -349,6 +359,16 @@ const en: MessageCatalog = {
     mud: 'Mud',
     grass_plant: 'Tall Grass',
     flower_red: 'Red Flower',
+    gravel: 'Gravel',
+    sandstone: 'Sandstone',
+    coal_ore: 'Coal Ore',
+    iron_ore: 'Iron Ore',
+    gold_ore: 'Gold Ore',
+    redstone_ore: 'Redstone Ore',
+    diamond_ore: 'Diamond Ore',
+    lapis_ore: 'Lapis Ore',
+    snow: 'Snow',
+    ice: 'Ice',
   },
   recipes: {
     planks: {

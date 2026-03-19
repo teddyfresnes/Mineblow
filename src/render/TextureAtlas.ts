@@ -34,6 +34,18 @@ const tileKeys = [
   'mud',
   'grass_plant',
   'flower_red',
+  'gravel',
+  'sandstone',
+  'sandstone_top',
+  'sandstone_bottom',
+  'coal_ore',
+  'iron_ore',
+  'gold_ore',
+  'redstone_ore',
+  'diamond_ore',
+  'lapis_ore',
+  'snow',
+  'ice',
 ] as const;
 
 type TileKey = (typeof tileKeys)[number];
@@ -57,6 +69,19 @@ const BLOCK_TEXTURES: Record<TileKey, string> = {
   mud: new URL('../../assets/textures/blocks/dirt.png', import.meta.url).href,
   grass_plant: new URL('../../assets/textures/blocks/tallgrass.png', import.meta.url).href,
   flower_red: new URL('../../assets/textures/blocks/flower_rose.png', import.meta.url).href,
+  gravel: new URL('../../assets/textures/blocks/gravel.png', import.meta.url).href,
+  sandstone: new URL('../../assets/textures/blocks/sandstone_normal.png', import.meta.url).href,
+  sandstone_top: new URL('../../assets/textures/blocks/sandstone_top.png', import.meta.url).href,
+  sandstone_bottom: new URL('../../assets/textures/blocks/sandstone_bottom.png', import.meta.url).href,
+  coal_ore: new URL('../../assets/textures/blocks/coal_ore.png', import.meta.url).href,
+  iron_ore: new URL('../../assets/textures/blocks/iron_ore.png', import.meta.url).href,
+  gold_ore: new URL('../../assets/textures/blocks/gold_ore.png', import.meta.url).href,
+  redstone_ore: new URL('../../assets/textures/blocks/redstone_ore.png', import.meta.url).href,
+  diamond_ore: new URL('../../assets/textures/blocks/diamond_ore.png', import.meta.url).href,
+  lapis_ore: new URL('../../assets/textures/blocks/lapis_ore.png', import.meta.url).href,
+  snow: new URL('../../assets/textures/blocks/snow.png', import.meta.url).href,
+  // b1.7.3 parity fallback: use glass when ice texture is missing from assets.
+  ice: new URL('../../assets/textures/blocks/glass.png', import.meta.url).href,
 };
 
 const PLACEHOLDER_COLORS = ['#5f5f5f', '#7b7b7b', '#8f8f8f', '#6b6b6b'] as const;

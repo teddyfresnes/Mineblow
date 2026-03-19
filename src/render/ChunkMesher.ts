@@ -10,6 +10,7 @@ import {
 import type { Chunk } from '../world/Chunk';
 import { chunkOriginX, chunkOriginZ } from '../world/ChunkCoord';
 import type { World } from '../world/World';
+import { WORLD_CONFIG } from '../game/Config';
 import type { TextureAtlas } from './TextureAtlas';
 
 type Face = {
@@ -89,7 +90,7 @@ export class ChunkMesher {
     const originX = chunkOriginX(chunk.coord);
     const originZ = chunkOriginZ(chunk.coord);
 
-    for (let y = 0; y < 96; y += 1) {
+    for (let y = 0; y < WORLD_CONFIG.chunkSizeY; y += 1) {
       for (let z = 0; z < 16; z += 1) {
         for (let x = 0; x < 16; x += 1) {
           const blockId = chunk.getBlock(x, y, z);

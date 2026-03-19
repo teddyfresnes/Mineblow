@@ -1,6 +1,6 @@
 export const WORLD_CONFIG = {
   chunkSizeX: 16,
-  chunkSizeY: 96,
+  chunkSizeY: 128,
   chunkSizeZ: 16,
   loadRadius: 3,
   preloadRadius: 4,

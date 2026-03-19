@@ -35,6 +35,18 @@ const TILE_TEXTURES: Record<string, string> = {
   mud: new URL('../../assets/textures/blocks/dirt.png', import.meta.url).href,
   grass_plant: new URL('../../assets/textures/blocks/tallgrass.png', import.meta.url).href,
   flower_red: new URL('../../assets/textures/blocks/flower_rose.png', import.meta.url).href,
+  gravel: new URL('../../assets/textures/blocks/gravel.png', import.meta.url).href,
+  sandstone: new URL('../../assets/textures/blocks/sandstone_normal.png', import.meta.url).href,
+  sandstone_top: new URL('../../assets/textures/blocks/sandstone_top.png', import.meta.url).href,
+  sandstone_bottom: new URL('../../assets/textures/blocks/sandstone_bottom.png', import.meta.url).href,
+  coal_ore: new URL('../../assets/textures/blocks/coal_ore.png', import.meta.url).href,
+  iron_ore: new URL('../../assets/textures/blocks/iron_ore.png', import.meta.url).href,
+  gold_ore: new URL('../../assets/textures/blocks/gold_ore.png', import.meta.url).href,
+  redstone_ore: new URL('../../assets/textures/blocks/redstone_ore.png', import.meta.url).href,
+  diamond_ore: new URL('../../assets/textures/blocks/diamond_ore.png', import.meta.url).href,
+  lapis_ore: new URL('../../assets/textures/blocks/lapis_ore.png', import.meta.url).href,
+  snow: new URL('../../assets/textures/blocks/snow.png', import.meta.url).href,
+  ice: new URL('../../assets/textures/blocks/glass.png', import.meta.url).href,
 };
 
 const texturePromises = new Map<string, Promise<HTMLImageElement | null>>();

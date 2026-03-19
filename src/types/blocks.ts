@@ -14,7 +14,17 @@ export type BlockId =
   | 12
   | 13
   | 14
-  | 15;
+  | 15
+  | 16
+  | 17
+  | 18
+  | 19
+  | 20
+  | 21
+  | 22
+  | 23
+  | 24
+  | 25;
 
 export type BlockKey =
   | 'air'
@@ -32,7 +42,17 @@ export type BlockKey =
   | 'clay'
   | 'mud'
   | 'grass_plant'
-  | 'flower_red';
+  | 'flower_red'
+  | 'gravel'
+  | 'sandstone'
+  | 'coal_ore'
+  | 'iron_ore'
+  | 'gold_ore'
+  | 'redstone_ore'
+  | 'diamond_ore'
+  | 'lapis_ore'
+  | 'snow'
+  | 'ice';
 
 export interface BlockDefinition {
   id: BlockId;
