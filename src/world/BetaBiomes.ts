@@ -1,6 +1,7 @@
 import type { BlockId } from '../types/blocks';
 import { LegacyRandom } from './LegacyRandom';
 import { SimplexOctaves } from './LegacyNoise';
+import { WORLDGEN_PROFILE } from './WorldgenProfile';
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
@@ -8,7 +9,7 @@ const toSigned64 = (value: bigint): bigint => BigInt.asIntN(64, value);
 
 const columnIndex = (x: number, z: number, width: number): number => x + z * width;
 
-export const SEA_LEVEL = 64;
+export const SEA_LEVEL = WORLDGEN_PROFILE.hydrology.floodLine;
 
 export enum BetaBiomeId {
   Rainforest = 0,
@@ -141,15 +142,15 @@ export class BetaBiomeSampler {
 
   constructor(worldSeed: bigint) {
     this.temperatureNoise = new SimplexOctaves(
-      new LegacyRandom(toSigned64(worldSeed * 9871n)),
+      new LegacyRandom(toSigned64(worldSeed * WORLDGEN_PROFILE.seeds.climateTemperature)),
       4,
     );
     this.rainNoise = new SimplexOctaves(
-      new LegacyRandom(toSigned64(worldSeed * 39811n)),
+      new LegacyRandom(toSigned64(worldSeed * WORLDGEN_PROFILE.seeds.climateHumidity)),
       4,
     );
     this.weirdNoise = new SimplexOctaves(
-      new LegacyRandom(toSigned64(worldSeed * 543321n)),
+      new LegacyRandom(toSigned64(worldSeed * WORLDGEN_PROFILE.seeds.climateWeirdness)),
       2,
     );
   }
@@ -161,9 +162,9 @@ export class BetaBiomeSampler {
       z,
       width,
       height,
-      0.02500000037252903,
-      0.02500000037252903,
-      0.25,
+      WORLDGEN_PROFILE.climateNoise.temperatureScale,
+      WORLDGEN_PROFILE.climateNoise.temperatureScale,
+      WORLDGEN_PROFILE.climateNoise.temperatureFreqFalloff,
     );
     this.rainBuffer = this.rainNoise.generate(
       this.rainBuffer,
@@ -171,9 +172,9 @@ export class BetaBiomeSampler {
       z,
       width,
       height,
-      0.05000000074505806,
-      0.05000000074505806,
-      0.3333333333333333,
+      WORLDGEN_PROFILE.climateNoise.humidityScale,
+      WORLDGEN_PROFILE.climateNoise.humidityScale,
+      WORLDGEN_PROFILE.climateNoise.humidityFreqFalloff,
     );
     this.weirdBuffer = this.weirdNoise.generate(
       this.weirdBuffer,
@@ -181,9 +182,9 @@ export class BetaBiomeSampler {
       z,
       width,
       height,
-      0.25,
-      0.25,
-      0.5882352941176471,
+      WORLDGEN_PROFILE.climateNoise.weirdnessScale,
+      WORLDGEN_PROFILE.climateNoise.weirdnessScale,
+      WORLDGEN_PROFILE.climateNoise.weirdnessFreqFalloff,
     );
 
     const biomes = new Array<BetaBiomeDefinition>(width * height);
@@ -234,9 +235,9 @@ export class BetaBiomeSampler {
       z,
       width,
       height,
-      0.02500000037252903,
-      0.02500000037252903,
-      0.25,
+      WORLDGEN_PROFILE.climateNoise.temperatureScale,
+      WORLDGEN_PROFILE.climateNoise.temperatureScale,
+      WORLDGEN_PROFILE.climateNoise.temperatureFreqFalloff,
     );
     this.weirdBuffer = this.weirdNoise.generate(
       this.weirdBuffer,
@@ -244,9 +245,9 @@ export class BetaBiomeSampler {
       z,
       width,
       height,
-      0.25,
-      0.25,
-      0.5882352941176471,
+      WORLDGEN_PROFILE.climateNoise.weirdnessScale,
+      WORLDGEN_PROFILE.climateNoise.weirdnessScale,
+      WORLDGEN_PROFILE.climateNoise.weirdnessFreqFalloff,
     );
 
     for (let localZ = 0; localZ < height; localZ += 1) {

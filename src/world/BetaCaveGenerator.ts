@@ -1,6 +1,7 @@
 import { WORLD_CONFIG } from '../game/Config';
 import { Chunk } from './Chunk';
 import { LegacyRandom } from './LegacyRandom';
+import { WORLDGEN_PROFILE } from './WorldgenProfile';
 
 const TAU = Math.PI * 2;
 const HALF_PI = Math.PI / 2;
@@ -16,7 +17,7 @@ const makeOdd = (value: bigint): bigint => {
 };
 
 export class BetaCaveGenerator {
-  private readonly range = 8;
+  private readonly range = WORLDGEN_PROFILE.caves.chunkReach;
 
   constructor(private readonly worldSeed: bigint) {}
 
@@ -240,7 +241,7 @@ export class BetaCaveGenerator {
       if (minX < 0) minX = 0;
       if (maxX > CHUNK_SIZE) maxX = CHUNK_SIZE;
       if (minY < 1) minY = 1;
-      if (maxY > 120) maxY = 120;
+      if (maxY > WORLDGEN_PROFILE.caves.maxCarveY) maxY = WORLDGEN_PROFILE.caves.maxCarveY;
       if (minZ < 0) minZ = 0;
       if (maxZ > CHUNK_SIZE) maxZ = CHUNK_SIZE;
 

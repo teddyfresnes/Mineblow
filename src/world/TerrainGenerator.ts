@@ -9,18 +9,19 @@ import { Chunk } from './Chunk';
 import { chunkOriginX, chunkOriginZ, toChunkKey } from './ChunkCoord';
 import { NoiseOctaves } from './LegacyNoise';
 import { LegacyRandom } from './LegacyRandom';
+import { WORLDGEN_PROFILE } from './WorldgenProfile';
 
 const CHUNK_WIDTH = WORLD_CONFIG.chunkSizeX;
 const CHUNK_HEIGHT = WORLD_CONFIG.chunkSizeY;
 const CHUNK_DEPTH = WORLD_CONFIG.chunkSizeZ;
 const CHUNK_VOLUME = CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_DEPTH;
 
-const DENSITY_GRID_XZ = 5;
-const DENSITY_GRID_Y = 17;
-const INTERPOLATION_XZ = 4;
-const INTERPOLATION_Y = 8;
-const DENSITY_SCALE = 684.412;
-const MAX_CACHED_CHUNKS = 256;
+const DENSITY_GRID_XZ = WORLDGEN_PROFILE.layout.coarseGridXZ;
+const DENSITY_GRID_Y = WORLDGEN_PROFILE.layout.coarseGridY;
+const INTERPOLATION_XZ = WORLDGEN_PROFILE.layout.coarseStepXZ;
+const INTERPOLATION_Y = WORLDGEN_PROFILE.layout.coarseStepY;
+const DENSITY_SCALE = WORLDGEN_PROFILE.terrainNoise.baseScale;
+const MAX_CACHED_CHUNKS = WORLDGEN_PROFILE.cache.maxChunks;
 
 const toSigned64 = (value: bigint): bigint => BigInt.asIntN(64, value);
 
@@ -143,7 +144,10 @@ export class TerrainGenerator {
 
   private rememberChunk(key: string, snapshot: CachedChunk): void {
     if (this.chunkCache.size >= MAX_CACHED_CHUNKS) {
-      const pruneTarget = Math.max(1, Math.floor(MAX_CACHED_CHUNKS / 4));
+      const pruneTarget = Math.max(
+        1,
+        Math.floor(MAX_CACHED_CHUNKS * WORLDGEN_PROFILE.cache.pruneFraction),
+      );
       let removed = 0;
       for (const cachedKey of this.chunkCache.keys()) {
         this.chunkCache.delete(cachedKey);
@@ -219,11 +223,7 @@ export class TerrainGenerator {
                 const localZ = coarseZ * INTERPOLATION_XZ + subZ;
 
                 const temperature = temperatures[columnIndex(localX, localZ, CHUNK_WIDTH)];
-                let block: BlockId = 0;
-
-                if (localY < SEA_LEVEL) {
-                  block = temperature < 0.5 && localY >= SEA_LEVEL - 1 ? 25 : 10;
-                }
+                let block = this.pickFluidBlock(localY, temperature);
 
                 if (densityAtPoint > 0) {
                   block = 3;
@@ -254,8 +254,8 @@ export class TerrainGenerator {
     temperatures: Float64Array,
     rain: Float64Array,
   ): Float64Array {
-    const coarseStartX = coord.x * 4;
-    const coarseStartZ = coord.z * 4;
+    const coarseStartX = coord.x * INTERPOLATION_XZ;
+    const coarseStartZ = coord.z * INTERPOLATION_XZ;
 
     this.lowFrequencyDepthNoise = this.depthNoise.generateNoise2D(
       this.lowFrequencyDepthNoise,
@@ -263,8 +263,8 @@ export class TerrainGenerator {
       coarseStartZ,
       DENSITY_GRID_XZ,
       DENSITY_GRID_XZ,
-      1.121,
-      1.121,
+      WORLDGEN_PROFILE.terrainNoise.depthFieldScale,
+      WORLDGEN_PROFILE.terrainNoise.depthFieldScale,
     );
     this.lowFrequencyScaleNoise = this.biomeScaleNoise.generateNoise2D(
       this.lowFrequencyScaleNoise,
@@ -272,8 +272,8 @@ export class TerrainGenerator {
       coarseStartZ,
       DENSITY_GRID_XZ,
       DENSITY_GRID_XZ,
-      200,
-      200,
+      WORLDGEN_PROFILE.terrainNoise.elevationFieldScale,
+      WORLDGEN_PROFILE.terrainNoise.elevationFieldScale,
     );
     this.mainNoiseField = this.mainNoise.generateNoise(
       this.mainNoiseField,
@@ -391,8 +391,10 @@ export class TerrainGenerator {
           }
 
           value -= verticalGradient;
-          if (coarseY > DENSITY_GRID_Y - 4) {
-            const alpha = (coarseY - (DENSITY_GRID_Y - 4)) / 3;
+          if (coarseY > DENSITY_GRID_Y - WORLDGEN_PROFILE.terrainNoise.roofFadeSlices) {
+            const alpha = (
+              coarseY - (DENSITY_GRID_Y - WORLDGEN_PROFILE.terrainNoise.roofFadeSlices)
+            ) / (WORLDGEN_PROFILE.terrainNoise.roofFadeSlices - 1);
             value = value * (1 - alpha) + -10 * alpha;
           }
 
@@ -407,11 +409,14 @@ export class TerrainGenerator {
 
   private applySurface(coord: ChunkCoord, blocks: Uint8Array, biomes: BetaBiomeDefinition[]): void {
     const random = new LegacyRandom(
-      toSigned64(BigInt(coord.x) * 341873128712n + BigInt(coord.z) * 132897987541n),
+      toSigned64(
+        BigInt(coord.x) * WORLDGEN_PROFILE.seeds.terrainX +
+        BigInt(coord.z) * WORLDGEN_PROFILE.seeds.terrainZ,
+      ),
     );
     const originX = chunkOriginX(coord);
     const originZ = chunkOriginZ(coord);
-    const noiseScale = 0.03125;
+    const noiseScale = WORLDGEN_PROFILE.surfaceNoise.baseScale;
 
     this.sandNoise = this.surfaceNoise.generateNoise(
       this.sandNoise,
@@ -428,7 +433,7 @@ export class TerrainGenerator {
     this.gravelNoise = this.surfaceNoise.generateNoise(
       this.gravelNoise,
       originX,
-      109.0134,
+      WORLDGEN_PROFILE.surfaceNoise.gravelYOffset,
       originZ,
       CHUNK_WIDTH,
       1,
@@ -484,7 +489,7 @@ export class TerrainGenerator {
             if (surfaceDepth <= 0) {
               topBlock = 0;
               fillerBlock = 3;
-            } else if (y >= SEA_LEVEL - 4 && y <= SEA_LEVEL + 1) {
+            } else if (y >= SEA_LEVEL - WORLDGEN_PROFILE.hydrology.shorelineBand && y <= SEA_LEVEL + 1) {
               topBlock = biome.topBlock;
               fillerBlock = biome.fillerBlock;
               if (useGravel) {
@@ -854,8 +859,8 @@ export class TerrainGenerator {
 
         const adjustedTemperature =
           this.snowTemperatureBuffer[columnIndex(localX, localZ, CHUNK_WIDTH)] -
-          ((topY - 64) / 64) * 0.3;
-        if (adjustedTemperature >= 0.5) {
+          ((topY - SEA_LEVEL) / SEA_LEVEL) * 0.3;
+        if (adjustedTemperature >= WORLDGEN_PROFILE.hydrology.freezeTemperature) {
           continue;
         }
 
@@ -927,6 +932,16 @@ export class TerrainGenerator {
     );
     random.setSeed(chunkSeed);
     return random;
+  }
+
+  private pickFluidBlock(localY: number, temperature: number): BlockId {
+    if (localY >= SEA_LEVEL) {
+      return 0;
+    }
+
+    const isSurfaceSlice = localY >= SEA_LEVEL - 1;
+    const shouldFreeze = temperature < WORLDGEN_PROFILE.hydrology.freezeTemperature;
+    return isSurfaceSlice && shouldFreeze ? 25 : 10;
   }
 
   private isInside(localX: number, localY: number, localZ: number): boolean {
