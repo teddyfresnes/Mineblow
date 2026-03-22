@@ -116,7 +116,6 @@ export class StartMenu {
   private readonly createNameInput = document.createElement('input');
   private readonly createSeedInput = document.createElement('input');
   private readonly playWorldButton = document.createElement('button');
-  private readonly editWorldButton = document.createElement('button');
   private readonly deleteWorldButton = document.createElement('button');
   private readonly saveEditWorldButton = document.createElement('button');
   private readonly startupFullscreenToggleButton = document.createElement('button');
@@ -566,8 +565,8 @@ export class StartMenu {
     const footer = document.createElement('div');
     footer.className = 'classic-footer-stack';
 
-    const primaryRow = document.createElement('div');
-    primaryRow.className = 'classic-footer-row two-columns';
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'classic-footer-row two-columns';
 
     this.playWorldButton.type = 'button';
     this.playWorldButton.className = 'menu-button';
@@ -578,43 +577,14 @@ export class StartMenu {
       }
     });
 
-    const createButton = document.createElement('button');
-    createButton.type = 'button';
-    createButton.className = 'menu-button';
-    this.localizeText(createButton, 'createWorld');
-    createButton.addEventListener('click', () => this.openCreateWorldScreen());
-
-    primaryRow.append(this.playWorldButton, createButton);
-
-    const secondaryRow = document.createElement('div');
-    secondaryRow.className = 'classic-footer-row three-columns';
-
-    this.editWorldButton.type = 'button';
-    this.editWorldButton.className = 'menu-button';
-    this.localizeText(this.editWorldButton, 'edit');
-    this.editWorldButton.addEventListener('click', () => this.openEditWorldScreen());
-
-    this.deleteWorldButton.type = 'button';
-    this.deleteWorldButton.className = 'menu-button';
-    this.localizeText(this.deleteWorldButton, 'delete');
-    this.deleteWorldButton.addEventListener('click', () => {
-      const world = this.getSelectedWorld();
-      if (!world) {
-        return;
-      }
-      if (window.confirm(this.tf('deleteWorldConfirm', { world: world.name }))) {
-        this.handlers.onDeleteWorld(world.id);
-      }
-    });
-
     const backButton = document.createElement('button');
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
     this.localizeText(backButton, 'back');
     backButton.addEventListener('click', () => this.showScreen('home'));
 
-    secondaryRow.append(this.editWorldButton, this.deleteWorldButton, backButton);
-    footer.append(primaryRow, secondaryRow);
+    actionsRow.append(this.playWorldButton, backButton);
+    footer.append(actionsRow);
 
     view.append(frame, footer);
     return view;
@@ -708,7 +678,7 @@ export class StartMenu {
     frame.append(content);
 
     const footer = document.createElement('div');
-    footer.className = 'classic-footer-row two-columns';
+    footer.className = 'classic-footer-row three-columns';
 
     this.saveEditWorldButton.type = 'button';
     this.saveEditWorldButton.className = 'menu-button';
@@ -722,13 +692,27 @@ export class StartMenu {
       this.showScreen('singleplayer');
     });
 
+    this.deleteWorldButton.type = 'button';
+    this.deleteWorldButton.className = 'menu-button danger';
+    this.localizeText(this.deleteWorldButton, 'delete');
+    this.deleteWorldButton.addEventListener('click', () => {
+      const world = this.getSelectedWorld();
+      if (!world) {
+        return;
+      }
+      if (window.confirm(this.tf('deleteWorldConfirm', { world: world.name }))) {
+        this.handlers.onDeleteWorld(world.id);
+        this.showScreen('singleplayer');
+      }
+    });
+
     const backButton = document.createElement('button');
     backButton.type = 'button';
     backButton.className = 'menu-button secondary';
     this.localizeText(backButton, 'back');
     backButton.addEventListener('click', () => this.showScreen('singleplayer'));
 
-    footer.append(this.saveEditWorldButton, backButton);
+    footer.append(this.saveEditWorldButton, this.deleteWorldButton, backButton);
     view.append(frame, footer);
     return view;
   }
@@ -1299,6 +1283,25 @@ export class StartMenu {
   private renderWorldSelection(): void {
     this.worldList.replaceChildren();
 
+    const createEntry = document.createElement('button');
+    createEntry.type = 'button';
+    createEntry.className = 'world-entry world-entry-create';
+    createEntry.addEventListener('click', () => this.openCreateWorldScreen());
+
+    const createPreview = document.createElement('div');
+    createPreview.className = 'world-entry-preview world-entry-create-preview';
+    createPreview.textContent = '+';
+
+    const createDetail = document.createElement('div');
+    createDetail.className = 'world-entry-detail';
+    const createTitle = document.createElement('strong');
+    createTitle.textContent = this.t('createWorld');
+    const createLabel = document.createElement('span');
+    createLabel.textContent = this.t('createWorldAction');
+    createDetail.append(createTitle, createLabel);
+    createEntry.append(createPreview, createDetail);
+    this.worldList.append(createEntry);
+
     if (this.worlds.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'empty-worlds';
@@ -1306,6 +1309,9 @@ export class StartMenu {
       this.worldList.append(empty);
     } else {
       this.worlds.forEach((world) => {
+        const row = document.createElement('div');
+        row.className = 'world-entry-row';
+
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'world-entry';
@@ -1316,6 +1322,29 @@ export class StartMenu {
           this.renderEditWorldScreen();
         });
         button.addEventListener('dblclick', () => this.handlers.onPlayWorld(world.id));
+
+        const editButton = document.createElement('button');
+        editButton.type = 'button';
+        editButton.className = 'menu-square-button world-entry-edit';
+        const editLabel = this.t('edit');
+        editButton.title = editLabel;
+        editButton.setAttribute('aria-label', editLabel);
+        const editIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        editIcon.setAttribute('viewBox', '0 0 24 24');
+        editIcon.setAttribute('aria-hidden', 'true');
+        const editIconPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        editIconPath.setAttribute(
+          'd',
+          'M3 17.25V21h3.75L19.81 7.94 16.06 4.19 3 17.25zm18-11.5a1.003 1.003 0 0 0 0-1.42l-1.34-1.34a1.003 1.003 0 0 0-1.42 0l-1.05 1.05 3.75 3.75L21 5.75z',
+        );
+        editIconPath.setAttribute('fill', 'currentColor');
+        editIcon.append(editIconPath);
+        editButton.append(editIcon);
+        editButton.addEventListener('click', (event) => {
+          event.stopPropagation();
+          this.selectedWorldId = world.id;
+          this.openEditWorldScreen();
+        });
 
         const preview = document.createElement('div');
         preview.className = 'world-entry-preview';
@@ -1332,14 +1361,13 @@ export class StartMenu {
         detail.append(title, created, lastPlayed);
 
         button.append(preview, detail);
-        this.worldList.append(button);
+        row.append(button, editButton);
+        this.worldList.append(row);
       });
     }
 
     const hasSelection = this.getSelectedWorld() !== null;
     this.playWorldButton.disabled = !hasSelection;
-    this.editWorldButton.disabled = !hasSelection;
-    this.deleteWorldButton.disabled = !hasSelection;
   }
 
   private renderEditWorldScreen(): void {
@@ -1350,6 +1378,7 @@ export class StartMenu {
       this.editWorldMeta.textContent = '';
       this.editNameInput.value = '';
       this.saveEditWorldButton.disabled = true;
+      this.deleteWorldButton.disabled = true;
       return;
     }
 
@@ -1362,6 +1391,7 @@ export class StartMenu {
       this.editNameInput.dataset.worldId = world.id;
     }
     this.saveEditWorldButton.disabled = false;
+    this.deleteWorldButton.disabled = false;
   }
 
   private renderStatsView(): void {

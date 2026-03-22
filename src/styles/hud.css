@@ -1496,18 +1496,45 @@ body.pointer-cursor-hidden * {
   padding-right: 4px;
 }
 
+.world-entry-row {
+  position: relative;
+}
+
 .world-entry {
   display: grid;
   grid-template-columns: 112px minmax(0, 1fr);
   gap: 14px;
   align-items: center;
-  padding: 12px;
+  width: 100%;
+  padding: 12px 68px 12px 12px;
   border: 2px solid transparent;
   background: rgba(0, 0, 0, 0.28);
   color: #fff;
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.world-entry.world-entry-create {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 12px;
+  border-color: rgba(255, 255, 255, 0.24);
+  background: linear-gradient(180deg, rgba(38, 54, 29, 0.95), rgba(19, 30, 14, 0.95));
+}
+
+.world-entry.world-entry-create:hover {
+  background: linear-gradient(180deg, rgba(45, 64, 35, 0.96), rgba(24, 38, 18, 0.96));
+}
+
+.world-entry-create-preview {
+  display: grid;
+  place-items: center;
+  font-size: 2rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.9);
+  background: linear-gradient(180deg, rgba(61, 87, 47, 0.85), rgba(29, 46, 22, 0.85));
 }
 
 .world-entry:hover {
@@ -1549,6 +1576,39 @@ body.pointer-cursor-hidden * {
 .world-entry-detail span {
   color: rgba(255, 255, 255, 0.76);
   font-size: 1rem;
+}
+
+.world-entry-edit {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 42px;
+  min-height: 42px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.world-entry-edit svg {
+  width: 18px;
+  height: 18px;
+}
+
+.world-entry-row:hover .world-entry-edit,
+.world-entry-row:focus-within .world-entry-edit {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (pointer: coarse) {
+  .world-entry-edit {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .classic-footer-stack {
@@ -1726,12 +1786,18 @@ body.pointer-cursor-hidden * {
 @media (max-width: 760px) {
   .world-entry {
     grid-template-columns: 1fr;
+    padding-right: 12px;
   }
 
   .world-entry-preview,
   .world-preview-large {
     width: 100%;
     max-width: none;
+  }
+
+  .world-entry-edit {
+    top: 24px;
+    transform: none;
   }
 
   .classic-footer-row.two-columns,
