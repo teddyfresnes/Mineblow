@@ -1598,17 +1598,9 @@ body.pointer-cursor-hidden * {
   height: 18px;
 }
 
-.world-entry-row:hover .world-entry-edit,
-.world-entry-row:focus-within .world-entry-edit {
+.world-entry.selected + .world-entry-edit {
   opacity: 1;
   pointer-events: auto;
-}
-
-@media (pointer: coarse) {
-  .world-entry-edit {
-    opacity: 1;
-    pointer-events: auto;
-  }
 }
 
 .classic-footer-stack {
