@@ -31,7 +31,7 @@ import {
 } from '../types/save';
 import type { VoxelHit } from '../types/world';
 import { debounce } from '../utils/debounce';
-import { setCurrentLanguage } from '../i18n/Language';
+import { setCurrentLanguage, translate } from '../i18n/Language';
 import { DebugOverlay } from '../ui/DebugOverlay';
 import { Hud, type HotbarInteractEvent } from '../ui/Hud';
 import {
@@ -83,6 +83,7 @@ const WORLD_PREVIEW_CAPTURE_DELAY_FRAMES = 16;
 const WORLD_PREVIEW_SIZE = 256;
 const DROP_PICKUP_DELAY_MS = 2000;
 const PAUSE_MENU_KEY = 'KeyP';
+const CHUNK_MESH_SYNC_BUDGET_MS = 2;
 
 export class Game {
   private readonly shell = document.createElement('div');
@@ -92,6 +93,10 @@ export class Game {
   private readonly introSplash = document.createElement('div');
   private readonly introSplashLabel = document.createElement('div');
   private readonly introSplashLoader = document.createElement('div');
+  private readonly worldLoadingOverlay = document.createElement('div');
+  private readonly worldLoadingCard = document.createElement('div');
+  private readonly worldLoadingSpinner = document.createElement('div');
+  private readonly worldLoadingLabel = document.createElement('div');
   private readonly renderer: Renderer;
   private readonly input: InputController;
   private readonly menu: StartMenu;
@@ -136,6 +141,8 @@ export class Game {
   private entryGateDelayTimeoutId: number | null = null;
   private pendingWorldPreviewCapture: { worldId: string; framesRemaining: number } | null = null;
   private readonly droppedItems = new Map<string, DroppedItem>();
+  private worldTransitionPending = false;
+  private hotbarDirty = false;
 
   constructor(private readonly root: HTMLElement) {
     this.shell.className = 'mineblow-shell';
@@ -152,12 +159,20 @@ export class Game {
     this.introSplashLoader.className = 'intro-splash-loader';
     this.introSplashLoader.setAttribute('aria-hidden', 'true');
     this.introSplash.append(this.introSplashLabel, this.introSplashLoader);
+    this.worldLoadingOverlay.className = 'world-loading-overlay';
+    this.worldLoadingOverlay.setAttribute('aria-hidden', 'true');
+    this.worldLoadingCard.className = 'world-loading-card';
+    this.worldLoadingSpinner.className = 'world-loading-spinner';
+    this.worldLoadingSpinner.setAttribute('aria-hidden', 'true');
+    this.worldLoadingLabel.className = 'world-loading-label';
+    this.worldLoadingCard.append(this.worldLoadingSpinner, this.worldLoadingLabel);
+    this.worldLoadingOverlay.append(this.worldLoadingCard);
     this.shell.append(this.canvas);
     const entryGateBody = document.createElement('div');
     entryGateBody.className = 'entry-gate-body';
     entryGateBody.append(this.entryGateButton);
     this.entryGate.append(entryGateBody);
-    this.shell.append(this.entryGate, this.introSplash);
+    this.shell.append(this.entryGate, this.introSplash, this.worldLoadingOverlay);
     this.root.append(this.shell);
 
     this.menuMusic.loop = true;
@@ -189,10 +204,10 @@ export class Game {
     });
     this.menu = new StartMenu(this.shell, {
       onPlayWorld: (worldId) => {
-        void this.loadWorld(worldId);
+        void this.runMenuWorldTransition(() => this.loadWorld(worldId));
       },
       onCreateWorld: (name, seed) => {
-        void this.startNewWorld(name, seed);
+        void this.runMenuWorldTransition(() => this.startNewWorld(name, seed));
       },
       onRenameWorld: (worldId, name) => {
         void this.renameWorld(worldId, name);
@@ -219,6 +234,7 @@ export class Game {
     setCurrentLanguage(this.settings.language);
     this.hud.setLanguage(this.settings.language);
     this.inventoryScreen.setLanguage(this.settings.language);
+    this.updateWorldLoadingLabel();
   }
 
   async bootstrap(): Promise<void> {
@@ -264,6 +280,7 @@ export class Game {
     this.hud.setHandSkin(settings.skinDataUrl);
     this.hud.setLanguage(this.settings.language);
     this.inventoryScreen.setLanguage(this.settings.language);
+    this.updateWorldLoadingLabel();
 
     if (this.settings.developerDebugMode) {
       await this.startDeveloperDebugSession(worlds);
@@ -285,6 +302,63 @@ export class Game {
     if (selectedWorldId !== undefined) {
       this.menu.setSelectedWorld(selectedWorldId);
     }
+  }
+
+  private async runMenuWorldTransition(run: () => Promise<void>): Promise<void> {
+    if (this.worldTransitionPending) {
+      return;
+    }
+
+    this.worldTransitionPending = true;
+    this.showWorldLoadingOverlay();
+    await this.waitForNextPaint();
+    try {
+      await run();
+    } finally {
+      this.hideWorldLoadingOverlay();
+      this.worldTransitionPending = false;
+    }
+  }
+
+  private showWorldLoadingOverlay(): void {
+    this.updateWorldLoadingLabel();
+    this.worldLoadingOverlay.classList.add('active');
+    this.worldLoadingOverlay.setAttribute('aria-hidden', 'false');
+  }
+
+  private hideWorldLoadingOverlay(): void {
+    this.worldLoadingOverlay.classList.remove('active');
+    this.worldLoadingOverlay.setAttribute('aria-hidden', 'true');
+  }
+
+  private updateWorldLoadingLabel(): void {
+    this.worldLoadingLabel.textContent = translate('menu.loadingWorld', {}, this.settings.language);
+  }
+
+  private async waitForNextPaint(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  }
+
+  private disposeSessionWorld(session: Session | null): void {
+    session?.world.dispose();
+  }
+
+  private markHotbarDirty(): void {
+    this.hotbarDirty = true;
+  }
+
+  private syncHotbarHud(): void {
+    if (!this.session || !this.hotbarDirty) {
+      return;
+    }
+
+    this.hud.updateHotbar(
+      this.session.inventory.getHotbarSlots(),
+      this.session.inventory.getSelectedHotbarIndex(),
+    );
+    this.hotbarDirty = false;
   }
 
   private async startDeveloperDebugSession(worlds: WorldSummary[]): Promise<void> {
@@ -345,6 +419,7 @@ export class Game {
       await this.flushSaves();
     }
 
+    this.disposeSessionWorld(this.session);
     this.session = null;
     this.pendingWorldPreviewCapture = null;
     this.input.exitPointerLock();
@@ -368,6 +443,7 @@ export class Game {
     this.hud.setMiningProgress(0);
     this.hud.setInventoryOverlayActive(false);
     this.hud.setVisible(false);
+    this.hotbarDirty = false;
     this.menu.setGlobalStats(this.globalStats);
     this.menu.setPauseWorld(null);
     this.updateCanvasVisibility();
@@ -459,6 +535,10 @@ export class Game {
     session: Session,
     openPauseOnPointerLockFailure = true,
   ): Promise<void> {
+    const previousSession = this.session;
+    if (previousSession && previousSession !== session) {
+      this.disposeSessionWorld(previousSession);
+    }
     this.session = session;
     this.updateCanvasVisibility();
     this.stopMenuMusic();
@@ -496,10 +576,8 @@ export class Game {
       worldStats: session.worldStats,
     });
     this.updateFirstPersonHandVisibility(session.inventory);
-    this.hud.updateHotbar(
-      session.inventory.getHotbarSlots(),
-      session.inventory.getSelectedHotbarIndex(),
-    );
+    this.markHotbarDirty();
+    this.syncHotbarHud();
     this.hud.setGenerating(session.world.hasPendingGeneration() || session.world.hasPendingMeshes());
     this.queueWorldPreviewCapture(session.id);
     await this.resumeSession(openPauseOnPointerLockFailure);
@@ -617,12 +695,14 @@ export class Game {
         if (wheelSteps !== 0) {
           inventory.shiftSelectedHotbar(wheelSteps);
           player.setSelectedSlot(inventory.getSelectedHotbarIndex());
+          this.markHotbarDirty();
         }
       }
       const directSlot = this.input.consumeNumberSlot();
       if (directSlot !== null) {
         inventory.setSelectedHotbarIndex(directSlot);
         player.setSelectedSlot(inventory.getSelectedHotbarIndex());
+        this.markHotbarDirty();
         if (this.inventoryScreen.isVisible()) {
           this.refreshInventoryScreen();
         }
@@ -743,10 +823,9 @@ export class Game {
     world.processGenerationBudget();
     this.syncChunkMeshes();
 
-    this.hud.updateHotbar(inventory.getHotbarSlots(), inventory.getSelectedHotbarIndex());
+    this.syncHotbarHud();
     this.hud.setGenerating(world.hasPendingGeneration() || world.hasPendingMeshes());
     this.hud.setFps(this.fpsValue);
-    this.hud.setHealth(20, 20);
     this.updateLevelHud();
 
     if (this.inventoryScreen.isVisible()) {
@@ -767,7 +846,9 @@ export class Game {
     }
 
     const [playerX, playerY, playerZ] = player.getPosition();
-    this.updateDebugPanel(playerX, playerY, playerZ);
+    if (this.debugOverlay.isVisible()) {
+      this.updateDebugPanel(playerX, playerY, playerZ);
+    }
     this.updatePointerUnlockPromptVisibility();
     this.input.endFrame();
   }
@@ -955,6 +1036,7 @@ export class Game {
       ) {
         this.renderer.triggerFirstPersonAction(1.05);
         inventory.consumeSelectedBlock();
+        this.markHotbarDirty();
         this.session.worldStats.blocksPlaced += 1;
         this.globalStats.totalBlocksPlaced += 1;
         this.persistDirtyChunks();
@@ -985,6 +1067,8 @@ export class Game {
     }
 
     this.inventoryCursor = this.session.inventory.returnCursor(this.inventoryCursor);
+    this.markHotbarDirty();
+    this.syncHotbarHud();
     if (this.inventoryCursor.blockId !== null && this.inventoryCursor.count > 0) {
       this.refreshInventoryScreen();
       return;
@@ -1084,7 +1168,8 @@ export class Game {
     );
     this.throwItemsFromPlayer(selected.blockId, dropCount);
 
-    this.hud.updateHotbar(inventory.getHotbarSlots(), inventory.getSelectedHotbarIndex());
+    this.markHotbarDirty();
+    this.syncHotbarHud();
     this.updateFirstPersonHandVisibility(inventory);
     if (this.inventoryScreen.isVisible()) {
       this.refreshInventoryScreen();
@@ -1127,6 +1212,7 @@ export class Game {
     const inventory = this.session.inventory;
     if (shift && this.inventoryCursor.blockId === null) {
       if (this.transferStackBetweenSections(inventory, index)) {
+        this.markHotbarDirty();
         this.refreshInventoryScreen();
       }
       return;
@@ -1152,6 +1238,7 @@ export class Game {
       );
     }
 
+    this.markHotbarDirty();
     this.refreshInventoryScreen();
   }
 
@@ -1169,10 +1256,8 @@ export class Game {
       this.session.worldStats.craftedItems += recipe.output.count;
       this.globalStats.totalCraftedItems += recipe.output.count;
       this.refreshInventoryScreen();
-      this.hud.updateHotbar(
-        this.session.inventory.getHotbarSlots(),
-        this.session.inventory.getSelectedHotbarIndex(),
-      );
+      this.markHotbarDirty();
+      this.syncHotbarHud();
       void this.persistProfile(true);
     }
   }
@@ -1182,16 +1267,23 @@ export class Game {
       return;
     }
 
-    for (const chunkKey of this.session.world.drainRemovedChunkKeys()) {
+    const world = this.session.world;
+    for (const chunkKey of world.drainRemovedChunkKeys()) {
       this.renderer.removeChunkMesh(chunkKey);
     }
 
-    for (const chunk of this.session.world.drainMeshUpdates()) {
-      const geometry = ChunkMesher.buildGeometry(chunk, this.session.world, this.renderer.atlas);
+    const startedAt = performance.now();
+    while (performance.now() - startedAt <= CHUNK_MESH_SYNC_BUDGET_MS) {
+      const [chunk] = world.drainMeshUpdates(1);
+      if (!chunk) {
+        break;
+      }
+
+      const geometry = ChunkMesher.buildGeometry(chunk, world, this.renderer.atlas);
       this.renderer.upsertChunkMesh(
         chunk.key,
         geometry,
-        this.session.world.getChunkOrigin(chunk.key),
+        world.getChunkOrigin(chunk.key),
       );
     }
   }
@@ -1491,7 +1583,8 @@ export class Game {
       ) {
         this.droppedItems.delete(id);
         this.renderer.removeDroppedItem(id);
-        this.hud.updateHotbar(inventory.getHotbarSlots(), inventory.getSelectedHotbarIndex());
+        this.markHotbarDirty();
+        this.syncHotbarHud();
         continue;
       }
 
@@ -1582,6 +1675,7 @@ export class Game {
     this.hud.setHandSkin(this.settings.skinDataUrl);
     this.hud.setLanguage(this.settings.language);
     this.inventoryScreen.setLanguage(this.settings.language);
+    this.updateWorldLoadingLabel();
     this.renderer.setPlayerSkin(this.settings.skinDataUrl);
     void this.saveRepository.saveSettings(this.settings);
     if (this.inventoryScreen.isVisible()) {

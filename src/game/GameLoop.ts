@@ -8,6 +8,7 @@ export class GameLoop {
     private readonly fixedStepSeconds: number,
     private readonly update: (dt: number) => void,
     private readonly render: (alpha: number) => void,
+    private readonly maxUpdatesPerFrame = 2,
   ) {
     this.tick = this.tick.bind(this);
   }
@@ -38,11 +39,16 @@ export class GameLoop {
 
     const frameSeconds = Math.min((time - this.lastTime) / 1000, 0.1);
     this.lastTime = time;
-    this.accumulator += frameSeconds;
+    this.accumulator = Math.min(
+      this.accumulator + frameSeconds,
+      this.fixedStepSeconds * this.maxUpdatesPerFrame,
+    );
 
-    while (this.accumulator >= this.fixedStepSeconds) {
+    let updateCount = 0;
+    while (this.accumulator >= this.fixedStepSeconds && updateCount < this.maxUpdatesPerFrame) {
       this.update(this.fixedStepSeconds);
       this.accumulator -= this.fixedStepSeconds;
+      updateCount += 1;
     }
 
     this.render(this.accumulator / this.fixedStepSeconds);

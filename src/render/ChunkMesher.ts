@@ -89,10 +89,13 @@ export class ChunkMesher {
     const uvs: number[] = [];
     const originX = chunkOriginX(chunk.coord);
     const originZ = chunkOriginZ(chunk.coord);
+    const chunkSizeX = WORLD_CONFIG.chunkSizeX;
+    const chunkSizeY = WORLD_CONFIG.chunkSizeY;
+    const chunkSizeZ = WORLD_CONFIG.chunkSizeZ;
 
-    for (let y = 0; y < WORLD_CONFIG.chunkSizeY; y += 1) {
-      for (let z = 0; z < 16; z += 1) {
-        for (let x = 0; x < 16; x += 1) {
+    for (let y = 0; y < chunkSizeY; y += 1) {
+      for (let z = 0; z < chunkSizeZ; z += 1) {
+        for (let x = 0; x < chunkSizeX; x += 1) {
           const blockId = chunk.getBlock(x, y, z);
           if (blockId === 0) {
             continue;
@@ -107,11 +110,18 @@ export class ChunkMesher {
           }
 
           for (const face of FACES) {
-            const neighborId = world.getBlock(
-              originX + x + face.normal[0],
-              y + face.normal[1],
-              originZ + z + face.normal[2],
-            );
+            const neighborX = x + face.normal[0];
+            const neighborY = y + face.normal[1];
+            const neighborZ = z + face.normal[2];
+            const neighborId =
+              neighborX >= 0 &&
+              neighborX < chunkSizeX &&
+              neighborY >= 0 &&
+              neighborY < chunkSizeY &&
+              neighborZ >= 0 &&
+              neighborZ < chunkSizeZ
+                ? chunk.getBlock(neighborX, neighborY, neighborZ)
+                : world.getBlock(originX + neighborX, neighborY, originZ + neighborZ);
             if (neighborId === blockId) {
               continue;
             }

@@ -24,7 +24,16 @@ export class Hud {
   private readonly levelLabel = document.createElement('div');
   private readonly hotbar = document.createElement('div');
   private readonly slotElements: HTMLButtonElement[] = [];
+  private readonly hotbarSnapshot: Array<{ blockId: InventorySlot['blockId']; count: number }> =
+    Array.from({ length: 9 }, () => ({ blockId: null, count: 0 }));
   private language: UiLanguage = DEFAULT_UI_LANGUAGE;
+  private generatingActive = false;
+  private displayedFps = 0;
+  private healthCurrent = 20;
+  private healthMax = 20;
+  private displayedLevel = 1;
+  private displayedLevelProgress = 0;
+  private selectedHotbarIndex = -1;
 
   constructor(parent: HTMLElement, private readonly handlers: HudHandlers = {}) {
     this.root.className = 'hud-layer';
@@ -131,10 +140,18 @@ export class Hud {
   }
 
   setGenerating(active: boolean): void {
+    if (this.generatingActive === active) {
+      return;
+    }
+    this.generatingActive = active;
     this.generationLabel.style.display = active ? '' : 'none';
   }
 
   setFps(fps: number): void {
+    if (this.displayedFps === fps) {
+      return;
+    }
+    this.displayedFps = fps;
     this.fpsLabel.textContent = `FPS ${fps}`;
   }
 
@@ -148,6 +165,11 @@ export class Hud {
   }
 
   setHealth(current: number, max: number): void {
+    if (this.healthCurrent === current && this.healthMax === max) {
+      return;
+    }
+    this.healthCurrent = current;
+    this.healthMax = max;
     const safeMax = Math.max(1, max);
     const ratio = Math.max(0, Math.min(1, current / safeMax));
     this.healthFill.style.width = `${ratio * 100}%`;
@@ -156,8 +178,14 @@ export class Hud {
 
   setLevel(level: number, progress: number): void {
     const ratio = Math.max(0, Math.min(1, progress));
+    const displayLevel = Math.max(1, Math.floor(level));
+    if (this.displayedLevel === displayLevel && this.displayedLevelProgress === ratio) {
+      return;
+    }
+    this.displayedLevel = displayLevel;
+    this.displayedLevelProgress = ratio;
     this.levelFill.style.width = `${ratio * 100}%`;
-    this.levelLabel.textContent = `LVL ${Math.max(1, Math.floor(level))}`;
+    this.levelLabel.textContent = `LVL ${displayLevel}`;
   }
 
   setHandSkin(dataUrl: string | null): void {
@@ -171,23 +199,43 @@ export class Hud {
   }
 
   updateHotbar(slots: InventorySlot[], selectedIndex: number): void {
+    if (this.selectedHotbarIndex !== selectedIndex) {
+      if (this.selectedHotbarIndex >= 0) {
+        this.slotElements[this.selectedHotbarIndex]?.classList.remove('selected');
+      }
+      this.slotElements[selectedIndex]?.classList.add('selected');
+      this.selectedHotbarIndex = selectedIndex;
+    }
+
     slots.forEach((slot, index) => {
+      const previous = this.hotbarSnapshot[index];
+      const blockChanged = previous.blockId !== slot.blockId;
+      const countChanged = previous.count !== slot.count;
+      if (!blockChanged && !countChanged) {
+        return;
+      }
+
       const slotElement = this.slotElements[index];
       const preview = slotElement.children[0] as HTMLDivElement;
       const count = slotElement.children[1] as HTMLDivElement;
-
-      slotElement.classList.toggle('selected', index === selectedIndex);
-      const icon = preview.firstElementChild;
-      if (icon instanceof HTMLCanvasElement) {
-        renderBlockSlotIcon(icon, slot.blockId);
+      if (blockChanged) {
+        const icon = preview.firstElementChild;
+        if (icon instanceof HTMLCanvasElement) {
+          renderBlockSlotIcon(icon, slot.blockId);
+        }
       }
 
-      if (slot.count > 0) {
-        count.textContent = String(slot.count);
-        count.style.display = '';
-      } else {
-        count.style.display = 'none';
+      if (countChanged) {
+        if (slot.count > 0) {
+          count.textContent = String(slot.count);
+          count.style.display = '';
+        } else {
+          count.style.display = 'none';
+        }
       }
+
+      previous.blockId = slot.blockId;
+      previous.count = slot.count;
     });
   }
 }

@@ -4,6 +4,7 @@ import type { ChunkDiffRecord } from '../types/save';
 import type { ChunkCoord } from '../types/world';
 import { distanceSquared2D } from '../utils/math';
 import { Chunk } from './Chunk';
+import { ChunkGenerationDispatcher } from './ChunkGenerationDispatcher';
 import {
   chunkOriginX,
   chunkOriginZ,
@@ -15,20 +16,33 @@ import {
 import { ChunkStore } from './ChunkStore';
 import { TerrainGenerator } from './TerrainGenerator';
 
+interface CompletedChunk {
+  coord: ChunkCoord;
+  blocks: Uint8Array;
+}
+
+const MAX_IN_FLIGHT_GENERATION = 2;
+
 export class World {
   readonly generator: TerrainGenerator;
 
   private readonly chunkStore = new ChunkStore();
   private readonly queuedKeys = new Set<string>();
   private readonly generationQueue: ChunkCoord[] = [];
+  private readonly desiredKeys = new Set<string>();
+  private readonly inFlightGeneration = new Map<string, ChunkCoord>();
+  private readonly completedGenerationQueue: CompletedChunk[] = [];
+  private readonly completedGenerationKeys = new Set<string>();
   private readonly meshDirtyKeys = new Set<string>();
   private readonly meshQueue: string[] = [];
   private readonly removedKeys = new Set<string>();
   private readonly chunkDiffs = new Map<string, Map<number, BlockId>>();
   private readonly diffDirtyKeys = new Set<string>();
+  private readonly chunkGenerationDispatcher: ChunkGenerationDispatcher;
 
   constructor(readonly seed: string, persistedDiffs?: Map<string, ChunkDiffRecord>) {
     this.generator = new TerrainGenerator(seed);
+    this.chunkGenerationDispatcher = new ChunkGenerationDispatcher(seed);
 
     if (persistedDiffs) {
       for (const [chunkKey, record] of persistedDiffs.entries()) {
@@ -45,11 +59,25 @@ export class World {
   }
 
   hasPendingGeneration(): boolean {
-    return this.generationQueue.length > 0;
+    return (
+      this.generationQueue.length > 0 ||
+      this.inFlightGeneration.size > 0 ||
+      this.completedGenerationQueue.length > 0
+    );
   }
 
   hasPendingMeshes(): boolean {
     return this.meshQueue.length > 0;
+  }
+
+  dispose(): void {
+    this.chunkGenerationDispatcher.dispose();
+    this.queuedKeys.clear();
+    this.generationQueue.length = 0;
+    this.desiredKeys.clear();
+    this.inFlightGeneration.clear();
+    this.completedGenerationQueue.length = 0;
+    this.completedGenerationKeys.clear();
   }
 
   getPlayerChunkCoord(x: number, z: number): ChunkCoord {
@@ -74,7 +102,12 @@ export class World {
         const coord = { x: chunkX, z: chunkZ };
         const key = toChunkKey(coord);
         desired.add(key);
-        if (!this.chunkStore.has(key) && !this.queuedKeys.has(key)) {
+        if (
+          !this.chunkStore.has(key) &&
+          !this.queuedKeys.has(key) &&
+          !this.inFlightGeneration.has(key) &&
+          !this.completedGenerationKeys.has(key)
+        ) {
           candidates.push({
             coord,
             distance: distanceSquared2D(chunkX, chunkZ, center.x, center.z),
@@ -82,10 +115,18 @@ export class World {
         }
       }
     }
+    this.desiredKeys.clear();
+    desired.forEach((key) => this.desiredKeys.add(key));
+    this.dropStaleCompletedChunks();
 
     const retainedQueue = this.generationQueue.filter((coord) => {
       const key = toChunkKey(coord);
-      return desired.has(key) && !this.chunkStore.has(key);
+      return (
+        desired.has(key) &&
+        !this.chunkStore.has(key) &&
+        !this.inFlightGeneration.has(key) &&
+        !this.completedGenerationKeys.has(key)
+      );
     });
     this.generationQueue.length = 0;
     this.generationQueue.push(...retainedQueue);
@@ -113,7 +154,32 @@ export class World {
   }
 
   processGenerationBudget(chunkBudget = WORLD_CONFIG.generationBudgetPerFrame): void {
-    for (let index = 0; index < chunkBudget; index += 1) {
+    const budget = Math.max(0, Math.floor(chunkBudget));
+
+    // Phase 1: integrate completed worker chunks into world state.
+    for (let index = 0; index < budget; index += 1) {
+      const completed = this.completedGenerationQueue.shift();
+      if (!completed) {
+        break;
+      }
+
+      const key = toChunkKey(completed.coord);
+      this.completedGenerationKeys.delete(key);
+      if (!this.desiredKeys.has(key) || this.chunkStore.has(key)) {
+        continue;
+      }
+
+      this.chunkStore.set(this.createChunkFromBlocks(completed.coord, completed.blocks));
+      this.queueMeshUpdate(key);
+      this.markNeighborsDirty(completed.coord);
+    }
+
+    // Phase 2: dispatch new async generation jobs conservatively for stable FPS.
+    for (
+      let index = 0;
+      index < budget && this.inFlightGeneration.size < MAX_IN_FLIGHT_GENERATION;
+      index += 1
+    ) {
       const coord = this.generationQueue.shift();
       if (!coord) {
         return;
@@ -121,13 +187,24 @@ export class World {
 
       const key = toChunkKey(coord);
       this.queuedKeys.delete(key);
-      if (this.chunkStore.has(key)) {
+      if (
+        this.chunkStore.has(key) ||
+        !this.desiredKeys.has(key) ||
+        this.inFlightGeneration.has(key) ||
+        this.completedGenerationKeys.has(key)
+      ) {
         continue;
       }
 
-      this.chunkStore.set(this.createChunk(coord));
-      this.queueMeshUpdate(key);
-      this.markNeighborsDirty(coord);
+      this.inFlightGeneration.set(key, coord);
+      void this.chunkGenerationDispatcher
+        .generateBlocks(coord)
+        .then((blocks) => {
+          this.handleChunkGenerated(coord, blocks);
+        })
+        .catch(() => {
+          this.handleChunkGenerationFailure(coord);
+        });
     }
   }
 
@@ -254,8 +331,12 @@ export class World {
   }
 
   private createChunk(coord: ChunkCoord): Chunk {
+    return this.createChunkFromBlocks(coord, this.generator.generateChunk(coord).blocks);
+  }
+
+  private createChunkFromBlocks(coord: ChunkCoord, blocks: Uint8Array): Chunk {
     const key = toChunkKey(coord);
-    const chunk = this.generator.generateChunk(coord);
+    const chunk = new Chunk(coord, blocks);
     const diffMap = this.chunkDiffs.get(key);
     if (diffMap) {
       for (const [index, blockId] of diffMap.entries()) {
@@ -263,6 +344,60 @@ export class World {
       }
     }
     return chunk;
+  }
+
+  private handleChunkGenerated(coord: ChunkCoord, blocks: Uint8Array): void {
+    const key = toChunkKey(coord);
+    if (!this.inFlightGeneration.delete(key)) {
+      return;
+    }
+    if (!this.desiredKeys.has(key) || this.chunkStore.has(key) || this.completedGenerationKeys.has(key)) {
+      return;
+    }
+
+    this.completedGenerationQueue.push({ coord, blocks });
+    this.completedGenerationKeys.add(key);
+  }
+
+  private handleChunkGenerationFailure(coord: ChunkCoord): void {
+    const key = toChunkKey(coord);
+    if (!this.inFlightGeneration.delete(key)) {
+      return;
+    }
+    if (
+      !this.desiredKeys.has(key) ||
+      this.chunkStore.has(key) ||
+      this.queuedKeys.has(key) ||
+      this.completedGenerationKeys.has(key)
+    ) {
+      return;
+    }
+
+    this.generationQueue.unshift(coord);
+    this.queuedKeys.add(key);
+  }
+
+  private dropStaleCompletedChunks(): void {
+    if (this.completedGenerationQueue.length === 0) {
+      return;
+    }
+
+    const retained: CompletedChunk[] = [];
+    for (const entry of this.completedGenerationQueue) {
+      const key = toChunkKey(entry.coord);
+      if (this.desiredKeys.has(key) && !this.chunkStore.has(key)) {
+        retained.push(entry);
+      } else {
+        this.completedGenerationKeys.delete(key);
+      }
+    }
+
+    if (retained.length === this.completedGenerationQueue.length) {
+      return;
+    }
+
+    this.completedGenerationQueue.length = 0;
+    this.completedGenerationQueue.push(...retained);
   }
 
   private getChunkDiffRecord(chunkKey: string): ChunkDiffRecord {

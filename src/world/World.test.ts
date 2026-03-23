@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { WORLD_CONFIG } from '../game/Config';
 import { World } from './World';
 
 describe('World diffs', () => {
@@ -13,5 +14,30 @@ describe('World diffs', () => {
     const baseBlock = world.generator.getTerrainBlock(0, surfaceY, 0);
     expect(world.setBlock(0, surfaceY, 0, baseBlock)).toBe(true);
     expect(world.getAllDiffRecords()).toHaveLength(0);
+    world.dispose();
+  });
+
+  it('counts in-flight generation as pending and drains after integration', async () => {
+    const config = WORLD_CONFIG as { preloadRadius: number };
+    const previousPreloadRadius = config.preloadRadius;
+    config.preloadRadius = 0;
+    const world = new World('pending');
+
+    try {
+      world.enqueueStreamingAround(0, 0);
+      expect(world.hasPendingGeneration()).toBe(true);
+
+      world.processGenerationBudget(1);
+      expect(world.hasPendingGeneration()).toBe(true);
+
+      await Promise.resolve();
+      world.processGenerationBudget(1);
+      await Promise.resolve();
+
+      expect(world.hasPendingGeneration()).toBe(false);
+    } finally {
+      world.dispose();
+      config.preloadRadius = previousPreloadRadius;
+    }
   });
 });

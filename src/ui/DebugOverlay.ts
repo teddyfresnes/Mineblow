@@ -20,6 +20,10 @@ export class DebugOverlay {
     this.root.style.display = visible ? '' : 'none';
   }
 
+  isVisible(): boolean {
+    return this.visible;
+  }
+
   update(text: string): void {
     this.panel.textContent = text;
   }
