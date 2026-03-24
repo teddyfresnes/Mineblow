@@ -578,7 +578,10 @@ export class Game {
     this.updateFirstPersonHandVisibility(session.inventory);
     this.markHotbarDirty();
     this.syncHotbarHud();
-    this.hud.setGenerating(session.world.hasPendingGeneration() || session.world.hasPendingMeshes());
+    this.hud.setGenerating(
+      this.settings.developerDebugMode &&
+        (session.world.hasPendingGeneration() || session.world.hasPendingMeshes()),
+    );
     this.queueWorldPreviewCapture(session.id);
     await this.resumeSession(openPauseOnPointerLockFailure);
   }
@@ -824,7 +827,10 @@ export class Game {
     this.syncChunkMeshes();
 
     this.syncHotbarHud();
-    this.hud.setGenerating(world.hasPendingGeneration() || world.hasPendingMeshes());
+    this.hud.setGenerating(
+      this.settings.developerDebugMode &&
+        (world.hasPendingGeneration() || world.hasPendingMeshes()),
+    );
     this.hud.setFps(this.fpsValue);
     this.updateLevelHud();
 
@@ -1676,6 +1682,9 @@ export class Game {
     this.hud.setLanguage(this.settings.language);
     this.inventoryScreen.setLanguage(this.settings.language);
     this.updateWorldLoadingLabel();
+    if (!this.settings.developerDebugMode) {
+      this.hud.setGenerating(false);
+    }
     this.renderer.setPlayerSkin(this.settings.skinDataUrl);
     void this.saveRepository.saveSettings(this.settings);
     if (this.inventoryScreen.isVisible()) {

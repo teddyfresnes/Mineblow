@@ -4,6 +4,7 @@ export const WORLD_CONFIG = {
   chunkSizeZ: 16,
   loadRadius: 3,
   preloadRadius: 4,
+  unloadRadiusBuffer: 2,
   maxInteractionDistance: 6,
   generationBudgetPerFrame: 1,
   meshBudgetPerFrame: 1,

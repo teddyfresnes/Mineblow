@@ -87,7 +87,9 @@ export class World {
   enqueueStreamingAround(worldX: number, worldZ: number): void {
     const center = this.getPlayerChunkCoord(worldX, worldZ);
     const desired = new Set<string>();
+    const retainedLoaded = new Set<string>();
     const candidates: Array<{ coord: ChunkCoord; distance: number }> = [];
+    const unloadRadius = WORLD_CONFIG.preloadRadius + WORLD_CONFIG.unloadRadiusBuffer;
 
     for (
       let chunkX = center.x - WORLD_CONFIG.preloadRadius;
@@ -115,6 +117,21 @@ export class World {
         }
       }
     }
+
+    for (
+      let chunkX = center.x - unloadRadius;
+      chunkX <= center.x + unloadRadius;
+      chunkX += 1
+    ) {
+      for (
+        let chunkZ = center.z - unloadRadius;
+        chunkZ <= center.z + unloadRadius;
+        chunkZ += 1
+      ) {
+        retainedLoaded.add(toChunkKey({ x: chunkX, z: chunkZ }));
+      }
+    }
+
     this.desiredKeys.clear();
     desired.forEach((key) => this.desiredKeys.add(key));
     this.dropStaleCompletedChunks();
@@ -143,7 +160,7 @@ export class World {
       });
 
     for (const [chunkKey, chunk] of this.chunkStore.entries()) {
-      if (desired.has(chunkKey)) {
+      if (retainedLoaded.has(chunkKey)) {
         continue;
       }
 
