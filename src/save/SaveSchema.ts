@@ -40,7 +40,7 @@ const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
 const isBlockId = (value: unknown): boolean =>
-  isFiniteNumber(value) && Number.isInteger(value) && value >= 0 && value <= 25;
+  isFiniteNumber(value) && Number.isInteger(value) && value >= 0 && value <= 32;
 
 const isVector3 = (value: unknown): value is [number, number, number] =>
   Array.isArray(value) && value.length === 3 && value.every((element) => isFiniteNumber(element));

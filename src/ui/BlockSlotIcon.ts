@@ -30,6 +30,8 @@ const TILE_TEXTURES: Record<string, string> = {
   crafting_table_side: new URL('../../assets/textures/blocks/crafting_table_side.png', import.meta.url).href,
   stone_bricks: new URL('../../assets/textures/blocks/stonebrick.png', import.meta.url).href,
   water: new URL('../../assets/textures/blocks/water_still.png', import.meta.url).href,
+  water_still: new URL('../../assets/textures/blocks/water_still.png', import.meta.url).href,
+  water_flow: new URL('../../assets/textures/blocks/water_flow.png', import.meta.url).href,
   sand: new URL('../../assets/textures/blocks/sand.png', import.meta.url).href,
   clay: new URL('../../assets/textures/blocks/clay.png', import.meta.url).href,
   mud: new URL('../../assets/textures/blocks/dirt.png', import.meta.url).href,

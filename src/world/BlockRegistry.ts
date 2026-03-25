@@ -6,6 +6,11 @@ interface InternalBlockDefinition extends BlockDefinition {
   uiColor: string;
 }
 
+export const WATER_SOURCE_BLOCK_ID = 10 as const;
+export const WATER_FLOW_LEVEL_MIN = 1 as const;
+export const WATER_FLOW_LEVEL_MAX = 7 as const;
+const WATER_FLOW_BLOCK_IDS = [26, 27, 28, 29, 30, 31, 32] as const;
+
 const definitions: Record<BlockKey, InternalBlockDefinition> = {
   air: {
     id: 0,
@@ -143,9 +148,9 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
     mineable: false,
     placeable: false,
     mineDurationMs: 0,
-    textureTop: 'water',
-    textureSide: 'water',
-    textureBottom: 'water',
+    textureTop: 'water_still',
+    textureSide: 'water_flow',
+    textureBottom: 'water_still',
     transparent: true,
     liquid: true,
     uiColor: '#4f89d6',
@@ -350,6 +355,111 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
     transparent: true,
     uiColor: '#8db6d8',
   },
+  water_flow_1: {
+    id: 26,
+    key: 'water_flow_1',
+    label: 'Eau',
+    solid: false,
+    mineable: false,
+    placeable: false,
+    mineDurationMs: 0,
+    textureTop: 'water_still',
+    textureSide: 'water_flow',
+    textureBottom: 'water_still',
+    transparent: true,
+    liquid: true,
+    uiColor: '#4f89d6',
+  },
+  water_flow_2: {
+    id: 27,
+    key: 'water_flow_2',
+    label: 'Eau',
+    solid: false,
+    mineable: false,
+    placeable: false,
+    mineDurationMs: 0,
+    textureTop: 'water_still',
+    textureSide: 'water_flow',
+    textureBottom: 'water_still',
+    transparent: true,
+    liquid: true,
+    uiColor: '#4f89d6',
+  },
+  water_flow_3: {
+    id: 28,
+    key: 'water_flow_3',
+    label: 'Eau',
+    solid: false,
+    mineable: false,
+    placeable: false,
+    mineDurationMs: 0,
+    textureTop: 'water_still',
+    textureSide: 'water_flow',
+    textureBottom: 'water_still',
+    transparent: true,
+    liquid: true,
+    uiColor: '#4f89d6',
+  },
+  water_flow_4: {
+    id: 29,
+    key: 'water_flow_4',
+    label: 'Eau',
+    solid: false,
+    mineable: false,
+    placeable: false,
+    mineDurationMs: 0,
+    textureTop: 'water_still',
+    textureSide: 'water_flow',
+    textureBottom: 'water_still',
+    transparent: true,
+    liquid: true,
+    uiColor: '#4f89d6',
+  },
+  water_flow_5: {
+    id: 30,
+    key: 'water_flow_5',
+    label: 'Eau',
+    solid: false,
+    mineable: false,
+    placeable: false,
+    mineDurationMs: 0,
+    textureTop: 'water_still',
+    textureSide: 'water_flow',
+    textureBottom: 'water_still',
+    transparent: true,
+    liquid: true,
+    uiColor: '#4f89d6',
+  },
+  water_flow_6: {
+    id: 31,
+    key: 'water_flow_6',
+    label: 'Eau',
+    solid: false,
+    mineable: false,
+    placeable: false,
+    mineDurationMs: 0,
+    textureTop: 'water_still',
+    textureSide: 'water_flow',
+    textureBottom: 'water_still',
+    transparent: true,
+    liquid: true,
+    uiColor: '#4f89d6',
+  },
+  water_flow_7: {
+    id: 32,
+    key: 'water_flow_7',
+    label: 'Eau',
+    solid: false,
+    mineable: false,
+    placeable: false,
+    mineDurationMs: 0,
+    textureTop: 'water_still',
+    textureSide: 'water_flow',
+    textureBottom: 'water_still',
+    transparent: true,
+    liquid: true,
+    uiColor: '#4f89d6',
+  },
 };
 
 const byId = new Map<BlockId, InternalBlockDefinition>(
@@ -386,6 +496,27 @@ export const isMineableBlock = (blockId: BlockId): boolean => getBlockDefinition
 export const isPlaceableBlock = (blockId: BlockId): boolean => getBlockDefinition(blockId).placeable;
 
 export const isWaterBlock = (blockId: BlockId): boolean => getBlockDefinition(blockId).liquid === true;
+
+export const isWaterSource = (blockId: BlockId): boolean => blockId === WATER_SOURCE_BLOCK_ID;
+
+export const isWaterFlowBlock = (blockId: BlockId): boolean =>
+  WATER_FLOW_BLOCK_IDS.includes(blockId as (typeof WATER_FLOW_BLOCK_IDS)[number]);
+
+export const getWaterLevel = (blockId: BlockId): number | null => {
+  if (blockId === WATER_SOURCE_BLOCK_ID) {
+    return 0;
+  }
+  if (!isWaterFlowBlock(blockId)) {
+    return null;
+  }
+
+  return blockId - WATER_FLOW_BLOCK_IDS[0] + 1;
+};
+
+export const toFlowWaterId = (level: number): BlockId => {
+  const clamped = Math.max(WATER_FLOW_LEVEL_MIN, Math.min(WATER_FLOW_LEVEL_MAX, Math.floor(level)));
+  return WATER_FLOW_BLOCK_IDS[clamped - 1] as BlockId;
+};
 
 export const isTransparentBlock = (blockId: BlockId): boolean =>
   getBlockDefinition(blockId).transparent === true;

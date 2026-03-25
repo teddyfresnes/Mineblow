@@ -3,6 +3,14 @@ import type { BlockId } from '../types/blocks';
 import type { ChunkDiffRecord } from '../types/save';
 import type { ChunkCoord } from '../types/world';
 import { distanceSquared2D } from '../utils/math';
+import {
+  getWaterLevel,
+  isPlantBlock,
+  isWaterBlock,
+  isWaterSource,
+  toFlowWaterId,
+  WATER_FLOW_LEVEL_MAX,
+} from './BlockRegistry';
 import { Chunk } from './Chunk';
 import { ChunkGenerationDispatcher } from './ChunkGenerationDispatcher';
 import {
@@ -22,6 +30,22 @@ interface CompletedChunk {
 }
 
 const MAX_IN_FLIGHT_GENERATION = 2;
+const FLUID_NEIGHBORS: Array<[number, number, number]> = [
+  [0, 0, 0],
+  [1, 0, 0],
+  [-1, 0, 0],
+  [0, 0, 1],
+  [0, 0, -1],
+  [0, 1, 0],
+  [0, -1, 0],
+];
+const FLUID_INTERFACE_OFFSETS: Array<[number, number]> = [
+  [0, 0],
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
 
 export class World {
   readonly generator: TerrainGenerator;
@@ -39,6 +63,9 @@ export class World {
   private readonly chunkDiffs = new Map<string, Map<number, BlockId>>();
   private readonly diffDirtyKeys = new Set<string>();
   private readonly chunkGenerationDispatcher: ChunkGenerationDispatcher;
+  private readonly fluidQueue: Array<[number, number, number]> = [];
+  private readonly fluidQueuedKeys = new Set<string>();
+  private fluidTickAccumulator = 0;
 
   constructor(readonly seed: string, persistedDiffs?: Map<string, ChunkDiffRecord>) {
     this.generator = new TerrainGenerator(seed);
@@ -78,6 +105,9 @@ export class World {
     this.inFlightGeneration.clear();
     this.completedGenerationQueue.length = 0;
     this.completedGenerationKeys.clear();
+    this.fluidQueue.length = 0;
+    this.fluidQueuedKeys.clear();
+    this.fluidTickAccumulator = 0;
   }
 
   getPlayerChunkCoord(x: number, z: number): ChunkCoord {
@@ -189,6 +219,7 @@ export class World {
       this.chunkStore.set(this.createChunkFromBlocks(completed.coord, completed.blocks));
       this.queueMeshUpdate(key);
       this.markNeighborsDirty(completed.coord);
+      this.seedFluidInterfaces(completed.coord);
     }
 
     // Phase 2: dispatch new async generation jobs conservatively for stable FPS.
@@ -237,6 +268,7 @@ export class World {
 
         this.chunkStore.set(this.createChunk(coord));
         this.queueMeshUpdate(key);
+        this.seedFluidInterfaces(coord);
       }
     }
   }
@@ -291,6 +323,7 @@ export class World {
     this.queueMeshUpdate(chunk.key);
     this.diffDirtyKeys.add(chunk.key);
     this.markBoundaryNeighborsDirty(coord, local.x, local.z);
+    this.enqueueFluidNeighborhood(worldX, worldY, worldZ);
     return true;
   }
 
@@ -308,6 +341,22 @@ export class World {
       x: chunkOriginX(coord),
       z: chunkOriginZ(coord),
     };
+  }
+
+  tickFluids(dtSeconds: number): void {
+    if (dtSeconds <= 0) {
+      return;
+    }
+
+    this.fluidTickAccumulator += dtSeconds;
+    while (this.fluidTickAccumulator >= WORLD_CONFIG.fluidTickSeconds) {
+      this.fluidTickAccumulator -= WORLD_CONFIG.fluidTickSeconds;
+      this.processFluidTick(WORLD_CONFIG.fluidBudgetPerTick);
+      if (this.fluidQueue.length === 0) {
+        this.fluidTickAccumulator = 0;
+        break;
+      }
+    }
   }
 
   drainMeshUpdates(budget = WORLD_CONFIG.meshBudgetPerFrame): Chunk[] {
@@ -460,6 +509,226 @@ export class World {
     }
     if (localZ === WORLD_CONFIG.chunkSizeZ - 1) {
       this.queueMeshUpdate(toChunkKey({ x: coord.x, z: coord.z + 1 }));
+    }
+  }
+
+  private processFluidTick(budget: number): void {
+    const cappedBudget = Math.max(0, Math.floor(budget));
+    for (let index = 0; index < cappedBudget; index += 1) {
+      const cell = this.fluidQueue.shift();
+      if (!cell) {
+        break;
+      }
+
+      const [worldX, worldY, worldZ] = cell;
+      this.fluidQueuedKeys.delete(`${worldX},${worldY},${worldZ}`);
+      this.reevaluateFluidCell(worldX, worldY, worldZ);
+    }
+  }
+
+  private reevaluateFluidCell(worldX: number, worldY: number, worldZ: number): void {
+    const current = this.getBlockIfLoaded(worldX, worldY, worldZ);
+    if (current === null || isWaterSource(current)) {
+      return;
+    }
+    if (!this.canWaterOccupy(current)) {
+      return;
+    }
+
+    const targetLevel = this.resolveFluidLevelForCell(worldX, worldY, worldZ);
+    if (targetLevel === null) {
+      if (!isWaterBlock(current)) {
+        return;
+      }
+      if (isWaterSource(current)) {
+        return;
+      }
+      if (!this.setBlock(worldX, worldY, worldZ, 0)) {
+        return;
+      }
+      this.enqueueFluidNeighborhood(worldX, worldY, worldZ);
+      return;
+    }
+
+    const targetBlock = toFlowWaterId(targetLevel);
+    if (current === targetBlock) {
+      return;
+    }
+    if (!this.setBlock(worldX, worldY, worldZ, targetBlock)) {
+      return;
+    }
+
+    this.enqueueFluidNeighborhood(worldX, worldY, worldZ);
+  }
+
+  private resolveFluidLevelForCell(worldX: number, worldY: number, worldZ: number): number | null {
+    const above = this.getBlockIfLoaded(worldX, worldY + 1, worldZ);
+    if (above !== null && isWaterBlock(above)) {
+      return 1;
+    }
+
+    let best: number | null = null;
+    const horizontalOffsets: Array<[number, number]> = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ];
+    for (const [offsetX, offsetZ] of horizontalOffsets) {
+      const neighbor = this.getBlockIfLoaded(worldX + offsetX, worldY, worldZ + offsetZ);
+      if (neighbor === null || !isWaterBlock(neighbor)) {
+        continue;
+      }
+
+      const neighborLevel = getWaterLevel(neighbor);
+      if (neighborLevel === null) {
+        continue;
+      }
+
+      const candidate = neighborLevel + 1;
+      if (candidate > WATER_FLOW_LEVEL_MAX) {
+        continue;
+      }
+      best = best === null ? candidate : Math.min(best, candidate);
+    }
+
+    return best;
+  }
+
+  private canWaterOccupy(blockId: BlockId): boolean {
+    return blockId === 0 || isPlantBlock(blockId) || (isWaterBlock(blockId) && !isWaterSource(blockId));
+  }
+
+  private getBlockIfLoaded(worldX: number, worldY: number, worldZ: number): BlockId | null {
+    if (worldY < 0 || worldY >= WORLD_CONFIG.chunkSizeY) {
+      return null;
+    }
+
+    const coord = worldToChunkCoord(worldX, worldZ);
+    const chunk = this.chunkStore.get(toChunkKey(coord));
+    if (!chunk) {
+      return null;
+    }
+
+    const local = worldToLocal(worldX, worldY, worldZ);
+    return chunk.getBlock(local.x, local.y, local.z);
+  }
+
+  private enqueueFluidCell(worldX: number, worldY: number, worldZ: number): void {
+    if (worldY < 0 || worldY >= WORLD_CONFIG.chunkSizeY) {
+      return;
+    }
+    if (this.getBlockIfLoaded(worldX, worldY, worldZ) === null) {
+      return;
+    }
+
+    const key = `${worldX},${worldY},${worldZ}`;
+    if (this.fluidQueuedKeys.has(key)) {
+      return;
+    }
+
+    this.fluidQueuedKeys.add(key);
+    this.fluidQueue.push([worldX, worldY, worldZ]);
+  }
+
+  private enqueueFluidNeighborhood(worldX: number, worldY: number, worldZ: number): void {
+    for (const [offsetX, offsetY, offsetZ] of FLUID_NEIGHBORS) {
+      this.enqueueFluidCell(worldX + offsetX, worldY + offsetY, worldZ + offsetZ);
+    }
+  }
+
+  private seedFluidInterfaces(coord: ChunkCoord): void {
+    const chunkKey = toChunkKey(coord);
+    if (!this.chunkStore.has(chunkKey)) {
+      return;
+    }
+
+    const neighbors: Array<{
+      coord: ChunkCoord;
+      boundaryX: number;
+      boundaryZ: number;
+      stepX: number;
+      stepZ: number;
+      axis: 'x' | 'z';
+    }> = [
+      {
+        coord: { x: coord.x + 1, z: coord.z },
+        boundaryX: WORLD_CONFIG.chunkSizeX - 1,
+        boundaryZ: 0,
+        stepX: 1,
+        stepZ: 0,
+        axis: 'x',
+      },
+      {
+        coord: { x: coord.x - 1, z: coord.z },
+        boundaryX: 0,
+        boundaryZ: 0,
+        stepX: -1,
+        stepZ: 0,
+        axis: 'x',
+      },
+      {
+        coord: { x: coord.x, z: coord.z + 1 },
+        boundaryX: 0,
+        boundaryZ: WORLD_CONFIG.chunkSizeZ - 1,
+        stepX: 0,
+        stepZ: 1,
+        axis: 'z',
+      },
+      {
+        coord: { x: coord.x, z: coord.z - 1 },
+        boundaryX: 0,
+        boundaryZ: 0,
+        stepX: 0,
+        stepZ: -1,
+        axis: 'z',
+      },
+    ];
+
+    const originX = chunkOriginX(coord);
+    const originZ = chunkOriginZ(coord);
+
+    for (const neighbor of neighbors) {
+      if (!this.chunkStore.has(toChunkKey(neighbor.coord))) {
+        continue;
+      }
+
+      if (neighbor.axis === 'x') {
+        const worldX = originX + neighbor.boundaryX;
+        for (let localZ = 0; localZ < WORLD_CONFIG.chunkSizeZ; localZ += 1) {
+          const worldZ = originZ + localZ;
+          this.seedFluidInterfaceCells(worldX, worldZ, neighbor.stepX, 0);
+        }
+        continue;
+      }
+
+      const worldZ = originZ + neighbor.boundaryZ;
+      for (let localX = 0; localX < WORLD_CONFIG.chunkSizeX; localX += 1) {
+        const worldX = originX + localX;
+        this.seedFluidInterfaceCells(worldX, worldZ, 0, neighbor.stepZ);
+      }
+    }
+  }
+
+  private seedFluidInterfaceCells(worldX: number, worldZ: number, stepX: number, stepZ: number): void {
+    for (let worldY = 0; worldY < WORLD_CONFIG.chunkSizeY; worldY += 1) {
+      const local = this.getBlockIfLoaded(worldX, worldY, worldZ);
+      const adjacent = this.getBlockIfLoaded(worldX + stepX, worldY, worldZ + stepZ);
+      if (local === null || adjacent === null) {
+        continue;
+      }
+      if (!isWaterBlock(local) && !isWaterBlock(adjacent)) {
+        continue;
+      }
+
+      for (const [offsetX, offsetZ] of FLUID_INTERFACE_OFFSETS) {
+        this.enqueueFluidCell(worldX + offsetX, worldY, worldZ + offsetZ);
+        this.enqueueFluidCell(worldX + stepX + offsetX, worldY, worldZ + stepZ + offsetZ);
+      }
+      this.enqueueFluidCell(worldX, worldY + 1, worldZ);
+      this.enqueueFluidCell(worldX, worldY - 1, worldZ);
+      this.enqueueFluidCell(worldX + stepX, worldY + 1, worldZ + stepZ);
+      this.enqueueFluidCell(worldX + stepX, worldY - 1, worldZ + stepZ);
     }
   }
 

@@ -8,6 +8,8 @@ export const WORLD_CONFIG = {
   maxInteractionDistance: 6,
   generationBudgetPerFrame: 1,
   meshBudgetPerFrame: 1,
+  fluidTickSeconds: 0.05,
+  fluidBudgetPerTick: 96,
   skyColor: '#9cc7f5',
 } as const;
 

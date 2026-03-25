@@ -24,7 +24,14 @@ export type BlockId =
   | 22
   | 23
   | 24
-  | 25;
+  | 25
+  | 26
+  | 27
+  | 28
+  | 29
+  | 30
+  | 31
+  | 32;
 
 export type BlockKey =
   | 'air'
@@ -52,7 +59,14 @@ export type BlockKey =
   | 'diamond_ore'
   | 'lapis_ore'
   | 'snow'
-  | 'ice';
+  | 'ice'
+  | 'water_flow_1'
+  | 'water_flow_2'
+  | 'water_flow_3'
+  | 'water_flow_4'
+  | 'water_flow_5'
+  | 'water_flow_6'
+  | 'water_flow_7';
 
 export interface BlockDefinition {
   id: BlockId;

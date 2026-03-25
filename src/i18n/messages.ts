@@ -176,6 +176,13 @@ const fr = {
     lapis_ore: 'Minerai de lapis',
     snow: 'Neige',
     ice: 'Glace',
+    water_flow_1: 'Eau',
+    water_flow_2: 'Eau',
+    water_flow_3: 'Eau',
+    water_flow_4: 'Eau',
+    water_flow_5: 'Eau',
+    water_flow_6: 'Eau',
+    water_flow_7: 'Eau',
   },
   recipes: {
     planks: {
@@ -371,6 +378,13 @@ const en: MessageCatalog = {
     lapis_ore: 'Lapis Ore',
     snow: 'Snow',
     ice: 'Ice',
+    water_flow_1: 'Water',
+    water_flow_2: 'Water',
+    water_flow_3: 'Water',
+    water_flow_4: 'Water',
+    water_flow_5: 'Water',
+    water_flow_6: 'Water',
+    water_flow_7: 'Water',
   },
   recipes: {
     planks: {

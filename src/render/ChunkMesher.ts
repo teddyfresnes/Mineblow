@@ -2,10 +2,12 @@ import { BufferGeometry, Float32BufferAttribute } from 'three';
 import type { BlockId } from '../types/blocks';
 import {
   getBlockDefinition,
+  getWaterLevel,
   isPlantBlock,
   isSolidBlock,
   isTransparentBlock,
   isWaterBlock,
+  WATER_FLOW_LEVEL_MAX,
 } from '../world/BlockRegistry';
 import type { Chunk } from '../world/Chunk';
 import { chunkOriginX, chunkOriginZ } from '../world/ChunkCoord';
@@ -82,6 +84,43 @@ const FACES: Face[] = [
   },
 ];
 
+export const WATER_SURFACE_BASE_HEIGHT = 0.875;
+export const WATER_SURFACE_MIN_HEIGHT = 0.125;
+
+export const waterLevelToSurfaceHeight = (level: number): number => {
+  if (!Number.isFinite(level) || level <= 0) {
+    return WATER_SURFACE_BASE_HEIGHT;
+  }
+  if (level >= WATER_FLOW_LEVEL_MAX) {
+    return WATER_SURFACE_MIN_HEIGHT;
+  }
+
+  const step = (WATER_SURFACE_BASE_HEIGHT - WATER_SURFACE_MIN_HEIGHT) / WATER_FLOW_LEVEL_MAX;
+  return WATER_SURFACE_BASE_HEIGHT - step * level;
+};
+
+export const smoothWaterCornerHeight = (
+  samples: Array<number | null>,
+  fallbackHeight: number,
+): number => {
+  let sum = 0;
+  let count = 0;
+  for (const sample of samples) {
+    if (sample === null) {
+      continue;
+    }
+    sum += sample;
+    count += 1;
+  }
+  if (count === 0) {
+    return fallbackHeight;
+  }
+  return sum / count;
+};
+
+export const shouldRenderWaterTopFace = (aboveBlockId: BlockId): boolean =>
+  !isWaterBlock(aboveBlockId);
+
 export class ChunkMesher {
   static buildGeometry(chunk: Chunk, world: World, atlas: TextureAtlas): BufferGeometry {
     const positions: number[] = [];
@@ -109,30 +148,41 @@ export class ChunkMesher {
             continue;
           }
 
+          if (isWaterBlock(blockId)) {
+            ChunkMesher.pushWaterBlock(
+              positions,
+              normals,
+              uvs,
+              chunk,
+              world,
+              atlas,
+              originX,
+              originZ,
+              x,
+              y,
+              z,
+              blockId,
+            );
+            continue;
+          }
+
           for (const face of FACES) {
             const neighborX = x + face.normal[0];
             const neighborY = y + face.normal[1];
             const neighborZ = z + face.normal[2];
-            const neighborId =
-              neighborX >= 0 &&
-              neighborX < chunkSizeX &&
-              neighborY >= 0 &&
-              neighborY < chunkSizeY &&
-              neighborZ >= 0 &&
-              neighborZ < chunkSizeZ
-                ? chunk.getBlock(neighborX, neighborY, neighborZ)
-                : world.getBlock(originX + neighborX, neighborY, originZ + neighborZ);
+            const neighborId = ChunkMesher.getBlockAt(
+              chunk,
+              world,
+              originX,
+              originZ,
+              neighborX,
+              neighborY,
+              neighborZ,
+            );
             if (neighborId === blockId) {
               continue;
             }
-            if (isWaterBlock(blockId) && isWaterBlock(neighborId)) {
-              continue;
-            }
-            if (
-              isSolidBlock(neighborId) &&
-              !isPlantBlock(neighborId) &&
-              !isTransparentBlock(neighborId)
-            ) {
+            if (ChunkMesher.isOpaqueOccluder(neighborId)) {
               continue;
             }
 
@@ -172,6 +222,329 @@ export class ChunkMesher {
     geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
     geometry.computeBoundingSphere();
     return geometry;
+  }
+
+  private static pushWaterBlock(
+    positions: number[],
+    normals: number[],
+    uvs: number[],
+    chunk: Chunk,
+    world: World,
+    atlas: TextureAtlas,
+    originX: number,
+    originZ: number,
+    x: number,
+    y: number,
+    z: number,
+    blockId: BlockId,
+  ): void {
+    const topRect = ChunkMesher.getFaceTextureRect(blockId, 'top', atlas);
+    const sideRect = ChunkMesher.getFaceTextureRect(blockId, 'side', atlas);
+    const bottomRect = ChunkMesher.getFaceTextureRect(blockId, 'bottom', atlas);
+    const aboveId = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y + 1, z);
+    const belowId = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y - 1, z);
+
+    const currentHeight = ChunkMesher.getRenderableWaterHeight(blockId, aboveId);
+    const cornerH00 = ChunkMesher.computeWaterCornerHeight(
+      chunk,
+      world,
+      originX,
+      originZ,
+      x,
+      y,
+      z,
+      [
+        [0, 0],
+        [-1, 0],
+        [0, -1],
+        [-1, -1],
+      ],
+      currentHeight,
+    );
+    const cornerH10 = ChunkMesher.computeWaterCornerHeight(
+      chunk,
+      world,
+      originX,
+      originZ,
+      x,
+      y,
+      z,
+      [
+        [0, 0],
+        [1, 0],
+        [0, -1],
+        [1, -1],
+      ],
+      currentHeight,
+    );
+    const cornerH11 = ChunkMesher.computeWaterCornerHeight(
+      chunk,
+      world,
+      originX,
+      originZ,
+      x,
+      y,
+      z,
+      [
+        [0, 0],
+        [1, 0],
+        [0, 1],
+        [1, 1],
+      ],
+      currentHeight,
+    );
+    const cornerH01 = ChunkMesher.computeWaterCornerHeight(
+      chunk,
+      world,
+      originX,
+      originZ,
+      x,
+      y,
+      z,
+      [
+        [0, 0],
+        [-1, 0],
+        [0, 1],
+        [-1, 1],
+      ],
+      currentHeight,
+    );
+
+    if (shouldRenderWaterTopFace(aboveId) && !ChunkMesher.isOpaqueOccluder(aboveId)) {
+      ChunkMesher.pushQuad(
+        positions,
+        normals,
+        uvs,
+        [
+          [x, y + cornerH01, z + 1],
+          [x + 1, y + cornerH11, z + 1],
+          [x + 1, y + cornerH10, z],
+          [x, y + cornerH00, z],
+        ],
+        [0, 1, 0],
+        [
+          [topRect.u0, topRect.v1],
+          [topRect.u0, topRect.v0],
+          [topRect.u1, topRect.v0],
+          [topRect.u1, topRect.v1],
+        ],
+      );
+    }
+
+    if (!isWaterBlock(belowId) && !ChunkMesher.isOpaqueOccluder(belowId)) {
+      ChunkMesher.pushQuad(
+        positions,
+        normals,
+        uvs,
+        [
+          [x, y, z],
+          [x + 1, y, z],
+          [x + 1, y, z + 1],
+          [x, y, z + 1],
+        ],
+        [0, -1, 0],
+        [
+          [bottomRect.u0, bottomRect.v1],
+          [bottomRect.u0, bottomRect.v0],
+          [bottomRect.u1, bottomRect.v0],
+          [bottomRect.u1, bottomRect.v1],
+        ],
+      );
+    }
+
+    const plusX = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x + 1, y, z);
+    if (!isWaterBlock(plusX) && !ChunkMesher.isOpaqueOccluder(plusX)) {
+      ChunkMesher.pushQuad(
+        positions,
+        normals,
+        uvs,
+        [
+          [x + 1, y, z],
+          [x + 1, y + cornerH10, z],
+          [x + 1, y + cornerH11, z + 1],
+          [x + 1, y, z + 1],
+        ],
+        [1, 0, 0],
+        [
+          [sideRect.u0, sideRect.v1],
+          [sideRect.u0, ChunkMesher.mapSideV(sideRect.v0, sideRect.v1, cornerH10)],
+          [sideRect.u1, ChunkMesher.mapSideV(sideRect.v0, sideRect.v1, cornerH11)],
+          [sideRect.u1, sideRect.v1],
+        ],
+      );
+    }
+
+    const minusX = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x - 1, y, z);
+    if (!isWaterBlock(minusX) && !ChunkMesher.isOpaqueOccluder(minusX)) {
+      ChunkMesher.pushQuad(
+        positions,
+        normals,
+        uvs,
+        [
+          [x, y, z + 1],
+          [x, y + cornerH01, z + 1],
+          [x, y + cornerH00, z],
+          [x, y, z],
+        ],
+        [-1, 0, 0],
+        [
+          [sideRect.u0, sideRect.v1],
+          [sideRect.u0, ChunkMesher.mapSideV(sideRect.v0, sideRect.v1, cornerH01)],
+          [sideRect.u1, ChunkMesher.mapSideV(sideRect.v0, sideRect.v1, cornerH00)],
+          [sideRect.u1, sideRect.v1],
+        ],
+      );
+    }
+
+    const plusZ = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y, z + 1);
+    if (!isWaterBlock(plusZ) && !ChunkMesher.isOpaqueOccluder(plusZ)) {
+      ChunkMesher.pushQuad(
+        positions,
+        normals,
+        uvs,
+        [
+          [x + 1, y, z + 1],
+          [x + 1, y + cornerH11, z + 1],
+          [x, y + cornerH01, z + 1],
+          [x, y, z + 1],
+        ],
+        [0, 0, 1],
+        [
+          [sideRect.u0, sideRect.v1],
+          [sideRect.u0, ChunkMesher.mapSideV(sideRect.v0, sideRect.v1, cornerH11)],
+          [sideRect.u1, ChunkMesher.mapSideV(sideRect.v0, sideRect.v1, cornerH01)],
+          [sideRect.u1, sideRect.v1],
+        ],
+      );
+    }
+
+    const minusZ = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y, z - 1);
+    if (!isWaterBlock(minusZ) && !ChunkMesher.isOpaqueOccluder(minusZ)) {
+      ChunkMesher.pushQuad(
+        positions,
+        normals,
+        uvs,
+        [
+          [x, y, z],
+          [x, y + cornerH00, z],
+          [x + 1, y + cornerH10, z],
+          [x + 1, y, z],
+        ],
+        [0, 0, -1],
+        [
+          [sideRect.u0, sideRect.v1],
+          [sideRect.u0, ChunkMesher.mapSideV(sideRect.v0, sideRect.v1, cornerH00)],
+          [sideRect.u1, ChunkMesher.mapSideV(sideRect.v0, sideRect.v1, cornerH10)],
+          [sideRect.u1, sideRect.v1],
+        ],
+      );
+    }
+  }
+
+  private static computeWaterCornerHeight(
+    chunk: Chunk,
+    world: World,
+    originX: number,
+    originZ: number,
+    x: number,
+    y: number,
+    z: number,
+    offsets: Array<[number, number]>,
+    fallbackHeight: number,
+  ): number {
+    const samples = offsets.map(([offsetX, offsetZ]) =>
+      ChunkMesher.sampleWaterHeight(
+        chunk,
+        world,
+        originX,
+        originZ,
+        x + offsetX,
+        y,
+        z + offsetZ,
+      ),
+    );
+    return smoothWaterCornerHeight(samples, fallbackHeight);
+  }
+
+  private static sampleWaterHeight(
+    chunk: Chunk,
+    world: World,
+    originX: number,
+    originZ: number,
+    x: number,
+    y: number,
+    z: number,
+  ): number | null {
+    const blockId = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y, z);
+    if (!isWaterBlock(blockId)) {
+      return null;
+    }
+    const aboveId = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y + 1, z);
+    return ChunkMesher.getRenderableWaterHeight(blockId, aboveId);
+  }
+
+  private static getRenderableWaterHeight(blockId: BlockId, aboveId: BlockId): number {
+    if (isWaterBlock(aboveId)) {
+      return 1;
+    }
+    const level = getWaterLevel(blockId);
+    if (level === null) {
+      return WATER_SURFACE_BASE_HEIGHT;
+    }
+    return waterLevelToSurfaceHeight(level);
+  }
+
+  private static mapSideV(vTop: number, vBottom: number, height: number): number {
+    const clamped = Math.max(0, Math.min(1, height));
+    return vBottom + (vTop - vBottom) * clamped;
+  }
+
+  private static isOpaqueOccluder(blockId: BlockId): boolean {
+    return (
+      isSolidBlock(blockId) &&
+      !isPlantBlock(blockId) &&
+      !isTransparentBlock(blockId)
+    );
+  }
+
+  private static getBlockAt(
+    chunk: Chunk,
+    world: World,
+    originX: number,
+    originZ: number,
+    x: number,
+    y: number,
+    z: number,
+  ): BlockId {
+    if (
+      x >= 0 &&
+      x < WORLD_CONFIG.chunkSizeX &&
+      y >= 0 &&
+      y < WORLD_CONFIG.chunkSizeY &&
+      z >= 0 &&
+      z < WORLD_CONFIG.chunkSizeZ
+    ) {
+      return chunk.getBlock(x, y, z);
+    }
+
+    return world.getBlock(originX + x, y, originZ + z);
+  }
+
+  private static pushQuad(
+    positions: number[],
+    normals: number[],
+    uvs: number[],
+    corners: Array<[number, number, number]>,
+    normal: [number, number, number],
+    quadUvs: Array<[number, number]>,
+  ): void {
+    const frontTriangles = [0, 1, 2, 0, 2, 3];
+    for (const triangleIndex of frontTriangles) {
+      const [cx, cy, cz] = corners[triangleIndex];
+      positions.push(cx, cy, cz);
+      normals.push(normal[0], normal[1], normal[2]);
+      uvs.push(...quadUvs[triangleIndex]);
+    }
   }
 
   private static pushPlantCross(

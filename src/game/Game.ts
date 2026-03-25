@@ -820,10 +820,12 @@ export class Game {
       this.updateDroppedItems(dt);
     }
 
+    this.renderer.updateAnimatedTextures(dt);
     this.renderer.updateTransientEffects(dt);
 
     world.enqueueStreamingAround(player.getPosition()[0], player.getPosition()[2]);
     world.processGenerationBudget();
+    world.tickFluids(dt);
     this.syncChunkMeshes();
 
     this.syncHotbarHud();

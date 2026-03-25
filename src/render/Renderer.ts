@@ -517,6 +517,10 @@ export class Renderer {
     }
   }
 
+  updateAnimatedTextures(dt: number): void {
+    this.atlas.update(dt);
+  }
+
   setMiningOverlay(hit: VoxelHit | null, progress: number): void {
     if (!hit || progress <= 0) {
       this.miningOverlay.visible = false;
