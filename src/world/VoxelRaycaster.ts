@@ -1,4 +1,5 @@
 import type { VoxelHit } from '../types/world';
+import { isWaterBlock } from './BlockRegistry';
 import type { World } from './World';
 
 export class VoxelRaycaster {
@@ -47,7 +48,7 @@ export class VoxelRaycaster {
 
     while (distance <= maxDistance) {
       const blockId = world.getBlock(x, y, z);
-      if (blockId !== 0) {
+      if (blockId !== 0 && !isWaterBlock(blockId)) {
         return {
           blockWorldX: x,
           blockWorldY: y,

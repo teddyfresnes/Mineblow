@@ -84,7 +84,7 @@ const FACES: Face[] = [
   },
 ];
 
-export const WATER_SURFACE_BASE_HEIGHT = 0.875;
+export const WATER_SURFACE_BASE_HEIGHT = 0.86;
 export const WATER_SURFACE_MIN_HEIGHT = 0.125;
 
 export const waterLevelToSurfaceHeight = (level: number): number => {
@@ -123,9 +123,12 @@ export const shouldRenderWaterTopFace = (aboveBlockId: BlockId): boolean =>
 
 export class ChunkMesher {
   static buildGeometry(chunk: Chunk, world: World, atlas: TextureAtlas): BufferGeometry {
-    const positions: number[] = [];
-    const normals: number[] = [];
-    const uvs: number[] = [];
+    const solidPositions: number[] = [];
+    const solidNormals: number[] = [];
+    const solidUvs: number[] = [];
+    const waterPositions: number[] = [];
+    const waterNormals: number[] = [];
+    const waterUvs: number[] = [];
     const originX = chunkOriginX(chunk.coord);
     const originZ = chunkOriginZ(chunk.coord);
     const chunkSizeX = WORLD_CONFIG.chunkSizeX;
@@ -144,15 +147,15 @@ export class ChunkMesher {
 
           if (isPlantBlock(blockId)) {
             const textureRect = ChunkMesher.getFaceTextureRect(blockId, 'side', atlas);
-            ChunkMesher.pushPlantCross(positions, normals, uvs, x, y, z, textureRect);
+            ChunkMesher.pushPlantCross(solidPositions, solidNormals, solidUvs, x, y, z, textureRect);
             continue;
           }
 
           if (isWaterBlock(blockId)) {
             ChunkMesher.pushWaterBlock(
-              positions,
-              normals,
-              uvs,
+              waterPositions,
+              waterNormals,
+              waterUvs,
               chunk,
               world,
               atlas,
@@ -179,7 +182,10 @@ export class ChunkMesher {
               neighborY,
               neighborZ,
             );
-            if (neighborId === blockId) {
+            if (
+              neighborId === blockId &&
+              !ChunkMesher.shouldRenderSharedLeafFace(face.normal, renderDoubleSided)
+            ) {
               continue;
             }
             if (ChunkMesher.isOpaqueOccluder(neighborId)) {
@@ -198,17 +204,17 @@ export class ChunkMesher {
 
             for (const triangleIndex of frontTriangles) {
               const [cx, cy, cz] = face.corners[triangleIndex];
-              positions.push(x + cx, y + cy, z + cz);
-              normals.push(...face.normal);
-              uvs.push(...faceUvs[triangleIndex]);
+              solidPositions.push(x + cx, y + cy, z + cz);
+              solidNormals.push(...face.normal);
+              solidUvs.push(...faceUvs[triangleIndex]);
             }
 
             if (renderDoubleSided) {
               for (const triangleIndex of backTriangles) {
                 const [cx, cy, cz] = face.corners[triangleIndex];
-                positions.push(x + cx, y + cy, z + cz);
-                normals.push(-face.normal[0], -face.normal[1], -face.normal[2]);
-                uvs.push(...faceUvs[triangleIndex]);
+                solidPositions.push(x + cx, y + cy, z + cz);
+                solidNormals.push(-face.normal[0], -face.normal[1], -face.normal[2]);
+                solidUvs.push(...faceUvs[triangleIndex]);
               }
             }
           }
@@ -217,9 +223,20 @@ export class ChunkMesher {
     }
 
     const geometry = new BufferGeometry();
+    const positions = solidPositions.concat(waterPositions);
+    const normals = solidNormals.concat(waterNormals);
+    const uvs = solidUvs.concat(waterUvs);
     geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
     geometry.setAttribute('normal', new Float32BufferAttribute(normals, 3));
     geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
+    const solidVertexCount = solidPositions.length / 3;
+    const waterVertexCount = waterPositions.length / 3;
+    if (solidVertexCount > 0) {
+      geometry.addGroup(0, solidVertexCount, 0);
+    }
+    if (waterVertexCount > 0) {
+      geometry.addGroup(solidVertexCount, waterVertexCount, 1);
+    }
     geometry.computeBoundingSphere();
     return geometry;
   }
@@ -238,9 +255,10 @@ export class ChunkMesher {
     z: number,
     blockId: BlockId,
   ): void {
-    const topRect = ChunkMesher.getFaceTextureRect(blockId, 'top', atlas);
+    const stillTopRect = ChunkMesher.getFaceTextureRect(blockId, 'top', atlas);
     const sideRect = ChunkMesher.getFaceTextureRect(blockId, 'side', atlas);
     const bottomRect = ChunkMesher.getFaceTextureRect(blockId, 'bottom', atlas);
+    const flowTopRect = atlas.getTileRect('water_flow');
     const aboveId = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y + 1, z);
     const belowId = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y - 1, z);
 
@@ -309,6 +327,20 @@ export class ChunkMesher {
       ],
       currentHeight,
     );
+    const waterLevel = getWaterLevel(blockId) ?? 0;
+    const topFlowDirection =
+      waterLevel > 0
+        ? ChunkMesher.computeWaterTopFlowDirection(chunk, world, originX, originZ, x, y, z)
+        : null;
+    const topUvs =
+      topFlowDirection === null
+        ? ([
+            [stillTopRect.u0, stillTopRect.v1],
+            [stillTopRect.u0, stillTopRect.v0],
+            [stillTopRect.u1, stillTopRect.v0],
+            [stillTopRect.u1, stillTopRect.v1],
+          ] as Array<[number, number]>)
+        : ChunkMesher.computeFlowTopUvs(flowTopRect, topFlowDirection);
 
     if (shouldRenderWaterTopFace(aboveId) && !ChunkMesher.isOpaqueOccluder(aboveId)) {
       ChunkMesher.pushQuad(
@@ -322,12 +354,7 @@ export class ChunkMesher {
           [x, y + cornerH00, z],
         ],
         [0, 1, 0],
-        [
-          [topRect.u0, topRect.v1],
-          [topRect.u0, topRect.v0],
-          [topRect.u1, topRect.v0],
-          [topRect.u1, topRect.v1],
-        ],
+        topUvs,
       );
     }
 
@@ -494,6 +521,94 @@ export class ChunkMesher {
     return waterLevelToSurfaceHeight(level);
   }
 
+  private static computeWaterTopFlowDirection(
+    chunk: Chunk,
+    world: World,
+    originX: number,
+    originZ: number,
+    x: number,
+    y: number,
+    z: number,
+  ): number | null {
+    const centerHeight = ChunkMesher.sampleWaterHeight(chunk, world, originX, originZ, x, y, z);
+    if (centerHeight === null) {
+      return null;
+    }
+
+    const directions = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as const;
+    let flowX = 0;
+    let flowZ = 0;
+
+    for (const [dx, dz] of directions) {
+      const neighborHeight = ChunkMesher.sampleWaterHeight(
+        chunk,
+        world,
+        originX,
+        originZ,
+        x + dx,
+        y,
+        z + dz,
+      );
+      if (neighborHeight !== null) {
+        const surfaceDrop = centerHeight - neighborHeight;
+        flowX += dx * surfaceDrop;
+        flowZ += dz * surfaceDrop;
+        continue;
+      }
+
+      const belowHeight = ChunkMesher.sampleWaterHeight(
+        chunk,
+        world,
+        originX,
+        originZ,
+        x + dx,
+        y - 1,
+        z + dz,
+      );
+      if (belowHeight !== null) {
+        // Prefer waterfall edges so the top texture clearly shows outward flow.
+        const waterfallPull = 1 + centerHeight - belowHeight;
+        flowX += dx * waterfallPull;
+        flowZ += dz * waterfallPull;
+      }
+    }
+
+    if (flowX * flowX + flowZ * flowZ < 0.0001) {
+      return null;
+    }
+    return Math.atan2(flowZ, flowX);
+  }
+
+  private static computeFlowTopUvs(
+    rect: { u0: number; v0: number; u1: number; v1: number },
+    flowDirection: number,
+  ): Array<[number, number]> {
+    const flowX = Math.sin(flowDirection) * 0.25;
+    const flowZ = Math.cos(flowDirection) * 0.25;
+    const centerU = (rect.u0 + rect.u1) * 0.5;
+    const centerV = (rect.v0 + rect.v1) * 0.5;
+    const radiusU = (rect.u1 - rect.u0) * 0.5;
+    const radiusV = (rect.v1 - rect.v0) * 0.5;
+    const clamp = (value: number, min: number, max: number): number =>
+      Math.max(min, Math.min(max, value));
+    const uvFromOffset = (uOffset: number, vOffset: number): [number, number] => [
+      clamp(centerU + uOffset * radiusU, rect.u0, rect.u1),
+      clamp(centerV + vOffset * radiusV, rect.v0, rect.v1),
+    ];
+
+    return [
+      uvFromOffset(-flowZ - flowX, -flowZ + flowX),
+      uvFromOffset(-flowZ + flowX, flowZ + flowX),
+      uvFromOffset(flowZ + flowX, flowZ - flowX),
+      uvFromOffset(flowZ - flowX, -flowZ - flowX),
+    ];
+  }
+
   private static mapSideV(vTop: number, vBottom: number, height: number): number {
     const clamped = Math.max(0, Math.min(1, height));
     return vBottom + (vTop - vBottom) * clamped;
@@ -505,6 +620,16 @@ export class ChunkMesher {
       !isPlantBlock(blockId) &&
       !isTransparentBlock(blockId)
     );
+  }
+
+  private static shouldRenderSharedLeafFace(
+    normal: [number, number, number],
+    isLeafBlock: boolean,
+  ): boolean {
+    if (!isLeafBlock) {
+      return false;
+    }
+    return normal[0] > 0 || normal[1] > 0 || normal[2] > 0;
   }
 
   private static getBlockAt(

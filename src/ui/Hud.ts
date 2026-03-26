@@ -1,5 +1,6 @@
 import type { InventorySlot } from '../types/player';
 import { DEFAULT_UI_LANGUAGE, translate, type UiLanguage } from '../i18n/Language';
+import { getBlockLabel } from '../world/BlockRegistry';
 import { createBlockSlotIconCanvas, renderBlockSlotIcon } from './BlockSlotIcon';
 
 export interface HotbarInteractEvent {
@@ -22,6 +23,7 @@ export class Hud {
   private readonly healthLabel = document.createElement('div');
   private readonly levelFill = document.createElement('div');
   private readonly levelLabel = document.createElement('div');
+  private readonly hotbarHoverLabel = document.createElement('div');
   private readonly hotbar = document.createElement('div');
   private readonly slotElements: HTMLButtonElement[] = [];
   private readonly hotbarSnapshot: Array<{ blockId: InventorySlot['blockId']; count: number }> =
@@ -34,6 +36,9 @@ export class Hud {
   private displayedLevel = 1;
   private displayedLevelProgress = 0;
   private selectedHotbarIndex = -1;
+  private hoveredHotbarIndex: number | null = null;
+  private pointerX = 0;
+  private pointerY = 0;
 
   constructor(parent: HTMLElement, private readonly handlers: HudHandlers = {}) {
     this.root.className = 'hud-layer';
@@ -86,6 +91,24 @@ export class Hud {
           shift: event.shiftKey,
         });
       });
+      slot.addEventListener('pointerenter', (event) => {
+        this.pointerX = event.clientX;
+        this.pointerY = event.clientY;
+        this.hoveredHotbarIndex = index;
+        this.renderHotbarHoverLabel();
+      });
+      slot.addEventListener('pointerleave', () => {
+        if (this.hoveredHotbarIndex !== index) {
+          return;
+        }
+        this.hoveredHotbarIndex = null;
+        this.renderHotbarHoverLabel();
+      });
+      slot.addEventListener('pointermove', (event) => {
+        this.pointerX = event.clientX;
+        this.pointerY = event.clientY;
+        this.positionHotbarHoverLabel();
+      });
 
       const preview = document.createElement('div');
       preview.className = 'slot-preview';
@@ -99,6 +122,7 @@ export class Hud {
       this.slotElements.push(slot);
     }
 
+    this.hotbarHoverLabel.className = 'hotbar-hover';
     this.root.append(
       this.pointerUnlockPrompt,
       this.crosshair,
@@ -106,6 +130,7 @@ export class Hud {
       this.fpsLabel,
       bars,
       this.hotbar,
+      this.hotbarHoverLabel,
     );
     parent.append(this.root);
     this.setHealth(20, 20);
@@ -115,18 +140,25 @@ export class Hud {
   setVisible(visible: boolean): void {
     if (!visible) {
       this.setPointerUnlockPromptVisible(false);
+      this.hoveredHotbarIndex = null;
+      this.renderHotbarHoverLabel();
     }
     this.root.style.display = visible ? '' : 'none';
   }
 
   setInventoryOverlayActive(active: boolean): void {
     this.root.classList.toggle('inventory-open', active);
+    if (!active) {
+      this.hoveredHotbarIndex = null;
+      this.renderHotbarHoverLabel();
+    }
   }
 
   setLanguage(language: UiLanguage): void {
     this.language = language;
     this.generationLabel.textContent = translate('hud.generating', {}, this.language);
     this.pointerUnlockPrompt.textContent = translate('hud.pointerUnlockPrompt', {}, this.language);
+    this.renderHotbarHoverLabel();
   }
 
   setPointerUnlockPromptVisible(visible: boolean): void {
@@ -237,5 +269,45 @@ export class Hud {
       previous.blockId = slot.blockId;
       previous.count = slot.count;
     });
+    this.renderHotbarHoverLabel();
+  }
+
+  private renderHotbarHoverLabel(): void {
+    if (!this.root.classList.contains('inventory-open') || this.hoveredHotbarIndex === null) {
+      this.hotbarHoverLabel.style.visibility = 'hidden';
+      this.hotbarHoverLabel.textContent = '';
+      return;
+    }
+
+    const hovered = this.hotbarSnapshot[this.hoveredHotbarIndex];
+    if (!hovered || hovered.blockId === null || hovered.count <= 0) {
+      this.hotbarHoverLabel.style.visibility = 'hidden';
+      this.hotbarHoverLabel.textContent = '';
+      return;
+    }
+
+    this.hotbarHoverLabel.textContent = `${getBlockLabel(hovered.blockId, this.language)} x${hovered.count}`;
+    this.hotbarHoverLabel.style.visibility = 'visible';
+    this.positionHotbarHoverLabel();
+  }
+
+  private positionHotbarHoverLabel(): void {
+    if (this.hotbarHoverLabel.style.visibility !== 'visible') {
+      return;
+    }
+
+    const zoom = this.getUiZoomFactor();
+    this.hotbarHoverLabel.style.left = `${this.pointerX / zoom + 10}px`;
+    this.hotbarHoverLabel.style.top = `${this.pointerY / zoom + 14}px`;
+  }
+
+  private getUiZoomFactor(): number {
+    const logicalWidth = this.root.offsetWidth;
+    const renderedWidth = this.root.getBoundingClientRect().width;
+    if (logicalWidth <= 0 || renderedWidth <= 0) {
+      return 1;
+    }
+    const zoom = renderedWidth / logicalWidth;
+    return Number.isFinite(zoom) && zoom > 0.01 ? zoom : 1;
   }
 }

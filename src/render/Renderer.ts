@@ -112,6 +112,7 @@ export class Renderer {
   readonly sky = new SkyDome();
 
   private readonly renderer: WebGLRenderer;
+  private readonly waterMaterial: MeshLambertMaterial;
   private readonly chunkMeshes = new Map<string, Mesh>();
   private readonly droppedItems = new Map<string, Mesh>();
   private readonly breakParticles: Array<{
@@ -159,6 +160,20 @@ export class Renderer {
     this.renderer.setClearColor(new Color(WORLD_CONFIG.skyColor));
     this.scene.background = new Color(WORLD_CONFIG.skyColor);
     this.scene.fog = new Fog(new Color('#95b9dd'), 60, 190);
+    const atlasMap = this.atlas.material.map;
+    if (!atlasMap) {
+      throw new Error('Texture atlas map is missing.');
+    }
+    this.atlas.material.transparent = false;
+    this.atlas.material.alphaTest = 0.35;
+    this.atlas.material.depthWrite = true;
+    this.waterMaterial = new MeshLambertMaterial({
+      map: atlasMap,
+      transparent: true,
+      opacity: 0.82,
+      depthWrite: false,
+      alphaTest: 0.01,
+    });
     this.scene.add(this.sky.group);
     this.scene.add(this.camera);
     this.handScene.add(this.handCamera);
@@ -235,7 +250,7 @@ export class Renderer {
       return;
     }
 
-    const mesh = new Mesh(geometry, this.atlas.material);
+    const mesh = new Mesh(geometry, [this.atlas.material, this.waterMaterial]);
     mesh.position.set(origin.x, 0, origin.z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;

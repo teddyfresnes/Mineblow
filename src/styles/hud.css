@@ -892,7 +892,8 @@ body.pointer-cursor-hidden * {
   text-transform: uppercase;
 }
 
-.inventory-hover {
+.inventory-hover,
+.hotbar-hover {
   position: fixed;
   left: 0;
   top: 0;
@@ -3262,7 +3263,8 @@ body.pointer-cursor-hidden * {
   text-shadow: none;
 }
 
-.inventory-hover {
+.inventory-hover,
+.hotbar-hover {
   border: 1px solid #585858;
   background: #c6c6c6;
   color: #000;

@@ -1021,15 +1021,18 @@ export class Game {
         return;
       }
 
+      const targetPlacementBlock = world.getBlock(
+        this.targetHit.placeWorldX,
+        this.targetHit.placeWorldY,
+        this.targetHit.placeWorldZ,
+      );
+      const canReplaceTargetBlock =
+        targetPlacementBlock === 0 || isWaterBlock(targetPlacementBlock);
       const selectedBlock = inventory.getSelectedBlock();
       if (
         selectedBlock !== null &&
         isPlaceableBlock(selectedBlock) &&
-        world.getBlock(
-          this.targetHit.placeWorldX,
-          this.targetHit.placeWorldY,
-          this.targetHit.placeWorldZ,
-        ) === 0 &&
+        canReplaceTargetBlock &&
         player.canOccupyBlock(
           this.targetHit.placeWorldX,
           this.targetHit.placeWorldY,
