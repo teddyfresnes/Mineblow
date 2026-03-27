@@ -258,7 +258,6 @@ export class ChunkMesher {
     const stillTopRect = ChunkMesher.getFaceTextureRect(blockId, 'top', atlas);
     const sideRect = ChunkMesher.getFaceTextureRect(blockId, 'side', atlas);
     const bottomRect = ChunkMesher.getFaceTextureRect(blockId, 'bottom', atlas);
-    const flowTopRect = atlas.getTileRect('water_flow');
     const aboveId = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y + 1, z);
     const belowId = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y - 1, z);
 
@@ -327,21 +326,6 @@ export class ChunkMesher {
       ],
       currentHeight,
     );
-    const waterLevel = getWaterLevel(blockId) ?? 0;
-    const topFlowDirection =
-      waterLevel > 0
-        ? ChunkMesher.computeWaterTopFlowDirection(chunk, world, originX, originZ, x, y, z)
-        : null;
-    const topUvs =
-      topFlowDirection === null
-        ? ([
-            [stillTopRect.u0, stillTopRect.v1],
-            [stillTopRect.u0, stillTopRect.v0],
-            [stillTopRect.u1, stillTopRect.v0],
-            [stillTopRect.u1, stillTopRect.v1],
-          ] as Array<[number, number]>)
-        : ChunkMesher.computeFlowTopUvs(flowTopRect, topFlowDirection);
-
     if (shouldRenderWaterTopFace(aboveId) && !ChunkMesher.isOpaqueOccluder(aboveId)) {
       ChunkMesher.pushQuad(
         positions,
@@ -354,7 +338,12 @@ export class ChunkMesher {
           [x, y + cornerH00, z],
         ],
         [0, 1, 0],
-        topUvs,
+        [
+          [stillTopRect.u0, stillTopRect.v1],
+          [stillTopRect.u0, stillTopRect.v0],
+          [stillTopRect.u1, stillTopRect.v0],
+          [stillTopRect.u1, stillTopRect.v1],
+        ],
       );
     }
 
@@ -519,94 +508,6 @@ export class ChunkMesher {
       return WATER_SURFACE_BASE_HEIGHT;
     }
     return waterLevelToSurfaceHeight(level);
-  }
-
-  private static computeWaterTopFlowDirection(
-    chunk: Chunk,
-    world: World,
-    originX: number,
-    originZ: number,
-    x: number,
-    y: number,
-    z: number,
-  ): number | null {
-    const centerHeight = ChunkMesher.sampleWaterHeight(chunk, world, originX, originZ, x, y, z);
-    if (centerHeight === null) {
-      return null;
-    }
-
-    const directions = [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ] as const;
-    let flowX = 0;
-    let flowZ = 0;
-
-    for (const [dx, dz] of directions) {
-      const neighborHeight = ChunkMesher.sampleWaterHeight(
-        chunk,
-        world,
-        originX,
-        originZ,
-        x + dx,
-        y,
-        z + dz,
-      );
-      if (neighborHeight !== null) {
-        const surfaceDrop = centerHeight - neighborHeight;
-        flowX += dx * surfaceDrop;
-        flowZ += dz * surfaceDrop;
-        continue;
-      }
-
-      const belowHeight = ChunkMesher.sampleWaterHeight(
-        chunk,
-        world,
-        originX,
-        originZ,
-        x + dx,
-        y - 1,
-        z + dz,
-      );
-      if (belowHeight !== null) {
-        // Prefer waterfall edges so the top texture clearly shows outward flow.
-        const waterfallPull = 1 + centerHeight - belowHeight;
-        flowX += dx * waterfallPull;
-        flowZ += dz * waterfallPull;
-      }
-    }
-
-    if (flowX * flowX + flowZ * flowZ < 0.0001) {
-      return null;
-    }
-    return Math.atan2(flowZ, flowX);
-  }
-
-  private static computeFlowTopUvs(
-    rect: { u0: number; v0: number; u1: number; v1: number },
-    flowDirection: number,
-  ): Array<[number, number]> {
-    const flowX = Math.sin(flowDirection) * 0.25;
-    const flowZ = Math.cos(flowDirection) * 0.25;
-    const centerU = (rect.u0 + rect.u1) * 0.5;
-    const centerV = (rect.v0 + rect.v1) * 0.5;
-    const radiusU = (rect.u1 - rect.u0) * 0.5;
-    const radiusV = (rect.v1 - rect.v0) * 0.5;
-    const clamp = (value: number, min: number, max: number): number =>
-      Math.max(min, Math.min(max, value));
-    const uvFromOffset = (uOffset: number, vOffset: number): [number, number] => [
-      clamp(centerU + uOffset * radiusU, rect.u0, rect.u1),
-      clamp(centerV + vOffset * radiusV, rect.v0, rect.v1),
-    ];
-
-    return [
-      uvFromOffset(-flowZ - flowX, -flowZ + flowX),
-      uvFromOffset(-flowZ + flowX, flowZ + flowX),
-      uvFromOffset(flowZ + flowX, flowZ - flowX),
-      uvFromOffset(flowZ - flowX, -flowZ - flowX),
-    ];
   }
 
   private static mapSideV(vTop: number, vBottom: number, height: number): number {

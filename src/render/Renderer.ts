@@ -170,7 +170,7 @@ export class Renderer {
     this.waterMaterial = new MeshLambertMaterial({
       map: atlasMap,
       transparent: true,
-      opacity: 0.82,
+      opacity: 1,
       depthWrite: false,
       alphaTest: 0.01,
     });

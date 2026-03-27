@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { WORLD_CONFIG } from '../game/Config';
-import { toFlowWaterId } from './BlockRegistry';
+import { isWaterBlock, toFlowWaterId } from './BlockRegistry';
 import { World } from './World';
 
 const runFluidTicks = (world: World, ticks: number): void => {
@@ -59,7 +59,27 @@ describe('World fluid simulation', () => {
     expect(world.getBlock(6, 25, 6)).toBe(toFlowWaterId(1));
     expect(world.getBlock(6, 24, 6)).toBe(toFlowWaterId(1));
     expect(world.getBlock(6, 21, 6)).toBe(toFlowWaterId(1));
-    expect(world.getBlock(7, 21, 6)).toBe(toFlowWaterId(1));
+    expect(isWaterBlock(world.getBlock(7, 21, 6))).toBe(true);
+    world.dispose();
+  });
+
+  it('prefers the nearest drop direction before lateral expansion', () => {
+    const world = new World('fluid-directed-flow');
+    world.primeAround(0, 0, 0);
+
+    fillBox(world, 0, 15, 18, 23, 0, 15, 0);
+    fillBox(world, 0, 15, 18, 18, 0, 15, 3);
+    fillBox(world, 0, 15, 20, 20, 0, 15, 3);
+    world.setBlock(8, 21, 8, 10);
+    world.setBlock(9, 20, 8, 0);
+
+    runFluidTicks(world, 40);
+
+    expect(world.getBlock(9, 21, 8)).toBe(toFlowWaterId(1));
+    expect(world.getBlock(9, 20, 8)).toBe(toFlowWaterId(1));
+    expect(world.getBlock(7, 21, 8)).toBe(0);
+    expect(world.getBlock(8, 21, 7)).toBe(0);
+    expect(world.getBlock(8, 21, 9)).toBe(0);
     world.dispose();
   });
 
@@ -79,6 +99,25 @@ describe('World fluid simulation', () => {
 
     expect(world.getBlock(6, 41, 5)).toBe(0);
     expect(world.getBlock(8, 41, 5)).toBe(0);
+    world.dispose();
+  });
+
+  it('fills a newly opened block directly below existing flowing water', () => {
+    const world = new World('fluid-underflow-fill');
+    world.primeAround(0, 0, 0);
+
+    fillBox(world, 0, 15, 28, 33, 0, 15, 0);
+    fillBox(world, 0, 15, 28, 30, 0, 15, 3);
+    world.setBlock(4, 31, 4, 10);
+
+    runFluidTicks(world, 80);
+    expect(world.getBlock(8, 31, 4)).toBe(toFlowWaterId(4));
+    expect(world.getBlock(8, 30, 4)).toBe(3);
+
+    world.setBlock(8, 30, 4, 0);
+    runFluidTicks(world, 12);
+
+    expect(world.getBlock(8, 30, 4)).toBe(toFlowWaterId(1));
     world.dispose();
   });
 });

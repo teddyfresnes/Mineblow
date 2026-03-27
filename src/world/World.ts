@@ -30,14 +30,21 @@ interface CompletedChunk {
 }
 
 const MAX_IN_FLIGHT_GENERATION = 2;
+const FLUID_HORIZONTAL_OFFSETS: Array<[number, number]> = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+const FLUID_FLOW_SEARCH_MAX_DEPTH = 4;
 const FLUID_NEIGHBORS: Array<[number, number, number]> = [
   [0, 0, 0],
+  [0, -1, 0],
   [1, 0, 0],
   [-1, 0, 0],
   [0, 0, 1],
   [0, 0, -1],
   [0, 1, 0],
-  [0, -1, 0],
 ];
 const FLUID_INTERFACE_OFFSETS: Array<[number, number]> = [
   [0, 0],
@@ -568,15 +575,14 @@ export class World {
     }
 
     let best: number | null = null;
-    const horizontalOffsets: Array<[number, number]> = [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ];
-    for (const [offsetX, offsetZ] of horizontalOffsets) {
-      const neighbor = this.getBlockIfLoaded(worldX + offsetX, worldY, worldZ + offsetZ);
+    for (const [offsetX, offsetZ] of FLUID_HORIZONTAL_OFFSETS) {
+      const neighborX = worldX + offsetX;
+      const neighborZ = worldZ + offsetZ;
+      const neighbor = this.getBlockIfLoaded(neighborX, worldY, neighborZ);
       if (neighbor === null || !isWaterBlock(neighbor)) {
+        continue;
+      }
+      if (!this.canReceiveHorizontalFlowFrom(neighborX, worldY, neighborZ, worldX, worldY, worldZ)) {
         continue;
       }
 
@@ -590,6 +596,123 @@ export class World {
         continue;
       }
       best = best === null ? candidate : Math.min(best, candidate);
+    }
+
+    return best;
+  }
+
+  private canReceiveHorizontalFlowFrom(
+    sourceX: number,
+    sourceY: number,
+    sourceZ: number,
+    targetX: number,
+    targetY: number,
+    targetZ: number,
+  ): boolean {
+    if (sourceY !== targetY) {
+      return false;
+    }
+
+    const deltaX = targetX - sourceX;
+    const deltaZ = targetZ - sourceZ;
+    let directionIndex = -1;
+    for (let index = 0; index < FLUID_HORIZONTAL_OFFSETS.length; index += 1) {
+      const [offsetX, offsetZ] = FLUID_HORIZONTAL_OFFSETS[index];
+      if (offsetX === deltaX && offsetZ === deltaZ) {
+        directionIndex = index;
+        break;
+      }
+    }
+    if (directionIndex < 0) {
+      return false;
+    }
+
+    const flowCosts = this.computeHorizontalFlowCosts(sourceX, sourceY, sourceZ);
+    const targetCost = flowCosts[directionIndex];
+    if (!Number.isFinite(targetCost)) {
+      return false;
+    }
+
+    let bestCost = Number.POSITIVE_INFINITY;
+    for (const cost of flowCosts) {
+      if (cost < bestCost) {
+        bestCost = cost;
+      }
+    }
+
+    return Number.isFinite(bestCost) && targetCost === bestCost;
+  }
+
+  private computeHorizontalFlowCosts(worldX: number, worldY: number, worldZ: number): number[] {
+    const costs = FLUID_HORIZONTAL_OFFSETS.map(() => Number.POSITIVE_INFINITY);
+    const below = this.getBlockIfLoaded(worldX, worldY - 1, worldZ);
+    if (below !== null && this.canWaterOccupy(below)) {
+      // If this cell can fall, it should not spread horizontally.
+      return costs;
+    }
+
+    for (let index = 0; index < FLUID_HORIZONTAL_OFFSETS.length; index += 1) {
+      const [offsetX, offsetZ] = FLUID_HORIZONTAL_OFFSETS[index];
+      const nextX = worldX + offsetX;
+      const nextZ = worldZ + offsetZ;
+      const next = this.getBlockIfLoaded(nextX, worldY, nextZ);
+      if (next === null || !this.canWaterOccupy(next)) {
+        continue;
+      }
+
+      const nextBelow = this.getBlockIfLoaded(nextX, worldY - 1, nextZ);
+      if (nextBelow !== null && this.canWaterOccupy(nextBelow)) {
+        costs[index] = 0;
+        continue;
+      }
+
+      const visited = new Set<string>();
+      visited.add(`${worldX},${worldY},${worldZ}`);
+      visited.add(`${nextX},${worldY},${nextZ}`);
+      const pathCost = this.findHorizontalFlowCost(nextX, worldY, nextZ, 1, visited);
+      costs[index] = Number.isFinite(pathCost) ? pathCost : FLUID_FLOW_SEARCH_MAX_DEPTH + 1;
+    }
+
+    return costs;
+  }
+
+  private findHorizontalFlowCost(
+    worldX: number,
+    worldY: number,
+    worldZ: number,
+    depth: number,
+    visited: Set<string>,
+  ): number {
+    if (depth >= FLUID_FLOW_SEARCH_MAX_DEPTH) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    let best = Number.POSITIVE_INFINITY;
+    for (const [offsetX, offsetZ] of FLUID_HORIZONTAL_OFFSETS) {
+      const nextX = worldX + offsetX;
+      const nextZ = worldZ + offsetZ;
+      const key = `${nextX},${worldY},${nextZ}`;
+      if (visited.has(key)) {
+        continue;
+      }
+
+      const next = this.getBlockIfLoaded(nextX, worldY, nextZ);
+      if (next === null || !this.canWaterOccupy(next)) {
+        continue;
+      }
+
+      const nextBelow = this.getBlockIfLoaded(nextX, worldY - 1, nextZ);
+      if (nextBelow !== null && this.canWaterOccupy(nextBelow)) {
+        best = Math.min(best, depth);
+        continue;
+      }
+
+      visited.add(key);
+      const nested = this.findHorizontalFlowCost(nextX, worldY, nextZ, depth + 1, visited);
+      visited.delete(key);
+      if (nested < best) {
+        best = nested;
+      }
     }
 
     return best;
