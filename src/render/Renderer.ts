@@ -1,12 +1,14 @@
 import {
   ACESFilmicToneMapping,
   AmbientLight,
+  DoubleSide,
   BufferAttribute,
   BoxGeometry,
   BufferGeometry,
   Color,
   DirectionalLight,
   Fog,
+  FrontSide,
   MeshLambertMaterial,
   MeshBasicMaterial,
   Mesh,
@@ -55,6 +57,9 @@ const WATER_TOP_ALPHA_GRAZE_BOOST = 0.18;
 const WATER_LUMA_BLEND = 0.08;
 const WATER_CONTRAST = 0.97;
 const WATER_EMISSIVE_INTENSITY = 0.07;
+const WATER_SURFACE_LINE_COLOR = new Color('#b9d8ff');
+const WATER_SURFACE_LINE_STRENGTH_SHALLOW = 0.24;
+const WATER_SURFACE_LINE_STRENGTH_DEEP = 0.1;
 const AIR_FOG_COLOR = '#95b9dd';
 const AIR_FOG_NEAR = 60;
 const AIR_FOG_FAR = 190;
@@ -161,6 +166,8 @@ export class Renderer {
   private readonly baseAmbientIntensity: number;
   private readonly baseSkyBounceIntensity: number;
   private readonly baseSunIntensity: number;
+  private waterSurfaceLineStrength = 0;
+  private waterSurfaceLineStrengthUniform: { value: number } | null = null;
   private handModel: Group | null = null;
   private heldItemMesh: Mesh | null = null;
   private heldBlockId: BlockId | null = null;
@@ -222,6 +229,11 @@ export class Renderer {
       shader.uniforms.uWaterTopAlphaGrazeBoost = { value: WATER_TOP_ALPHA_GRAZE_BOOST };
       shader.uniforms.uWaterLumaBlend = { value: WATER_LUMA_BLEND };
       shader.uniforms.uWaterContrast = { value: WATER_CONTRAST };
+      shader.uniforms.uWaterSurfaceLineColor = { value: WATER_SURFACE_LINE_COLOR.clone() };
+      shader.uniforms.uWaterSurfaceLineStrength = { value: this.waterSurfaceLineStrength };
+      this.waterSurfaceLineStrengthUniform = shader.uniforms.uWaterSurfaceLineStrength as {
+        value: number;
+      };
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <common>',
         `#include <common>
@@ -232,6 +244,8 @@ uniform float uWaterTopAlphaBoost;
 uniform float uWaterTopAlphaGrazeBoost;
 uniform float uWaterLumaBlend;
 uniform float uWaterContrast;
+uniform vec3 uWaterSurfaceLineColor;
+uniform float uWaterSurfaceLineStrength;
 `,
       );
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -244,12 +258,15 @@ float waterTopFaceMask = smoothstep(0.72, 0.95, normalize(vNormal).y);
 diffuseColor.rgb = mix(diffuseColor.rgb, uWaterTint, waterTopFaceMask * uWaterTopTintBoost);
 float waterTopViewFacing = clamp(abs(dot(normalize(vNormal), normalize(vViewPosition))), 0.0, 1.0);
 float waterTopSurfaceOpacity = waterTopFaceMask * (uWaterTopAlphaBoost + (1.0 - waterTopViewFacing) * uWaterTopAlphaGrazeBoost);
+float waterBackFaceMask = gl_FrontFacing ? 0.0 : 1.0;
+float waterSurfaceLine = waterTopFaceMask * waterBackFaceMask * pow(1.0 - waterTopViewFacing, 3.0);
+diffuseColor.rgb += uWaterSurfaceLineColor * (waterSurfaceLine * uWaterSurfaceLineStrength);
 diffuseColor.rgb = mix(vec3(0.5), diffuseColor.rgb, uWaterContrast);
-diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity);
+diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurfaceLine * uWaterSurfaceLineStrength * 0.35);
 `,
       );
     };
-    this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v3';
+    this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v4';
     this.scene.add(this.sky.group);
     this.scene.add(this.camera);
     this.handScene.add(this.handCamera);
@@ -505,8 +522,18 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity);
   }
 
   setUnderwaterView(enabled: boolean, depth = 0): void {
+    const targetWaterSide = enabled ? DoubleSide : FrontSide;
+    if (this.waterMaterial.side !== targetWaterSide) {
+      this.waterMaterial.side = targetWaterSide;
+      this.waterMaterial.needsUpdate = true;
+    }
+
     this.sky.group.visible = !enabled;
     if (!enabled) {
+      this.waterSurfaceLineStrength = 0;
+      if (this.waterSurfaceLineStrengthUniform) {
+        this.waterSurfaceLineStrengthUniform.value = 0;
+      }
       this.sceneFog.color.copy(this.airFogColor);
       this.sceneFog.near = AIR_FOG_NEAR;
       this.sceneFog.far = AIR_FOG_FAR;
@@ -520,6 +547,14 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity);
     }
 
     const depthRatio = clamp01(depth / UNDERWATER_DEPTH_FOR_MAX_ATTENUATION);
+    this.waterSurfaceLineStrength = lerp(
+      WATER_SURFACE_LINE_STRENGTH_SHALLOW,
+      WATER_SURFACE_LINE_STRENGTH_DEEP,
+      depthRatio,
+    );
+    if (this.waterSurfaceLineStrengthUniform) {
+      this.waterSurfaceLineStrengthUniform.value = this.waterSurfaceLineStrength;
+    }
     const fogColor = this.fogMixColor
       .copy(this.underwaterFogColor)
       .lerp(this.underwaterDeepFogColor, depthRatio);
