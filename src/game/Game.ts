@@ -48,6 +48,7 @@ import {
   isPlaceableBlock,
   isSolidBlock,
   isWaterBlock,
+  isWaterSource,
 } from '../world/BlockRegistry';
 import { VoxelRaycaster } from '../world/VoxelRaycaster';
 import { World } from '../world/World';
@@ -69,6 +70,8 @@ interface DroppedItem {
   velocity: [number, number, number];
   ageMs: number;
   pickupDelayMs: number;
+  wasInWater: boolean;
+  waterOutflowExitImpulse: [number, number];
 }
 
 interface UnderwaterViewState {
@@ -91,6 +94,9 @@ const DROP_PICKUP_DELAY_MS = 2000;
 const PAUSE_MENU_KEY = 'KeyP';
 const CHUNK_MESH_SYNC_BUDGET_MS = 2;
 const UNDERWATER_SURFACE_SCAN_MAX_BLOCKS = 160;
+const ITEM_WATER_FLOW_ACCELERATION = 4.25;
+const ITEM_WATER_OUTFLOW_ACCELERATION = 2.1;
+const ITEM_WATER_OUTFLOW_EXIT_IMPULSE_SCALE = 0.84;
 
 export class Game {
   private readonly shell = document.createElement('div');
@@ -1556,6 +1562,8 @@ export class Game {
       velocity,
       ageMs: 0,
       pickupDelayMs,
+      wasInWater: false,
+      waterOutflowExitImpulse: [0, 0],
     };
     this.droppedItems.set(id, dropped);
     this.renderer.spawnDroppedItem(id, blockId, x, y, z);
@@ -1575,23 +1583,61 @@ export class Game {
 
     for (const [id, item] of this.droppedItems.entries()) {
       item.ageMs += dt * 1000;
-      const blockAtItem = world.getBlock(
-        Math.floor(item.position[0]),
-        Math.floor(item.position[1]),
-        Math.floor(item.position[2]),
+      const wasInWater = item.wasInWater;
+      const waterContact = this.sampleWaterContactAtPoint(
+        world,
+        item.position[0],
+        item.position[1],
+        item.position[2],
       );
-      const inWater = isWaterBlock(blockAtItem);
+      const inWater = waterContact.inWater;
 
       if (inWater) {
         item.velocity[0] *= 0.9;
         item.velocity[2] *= 0.9;
+        let flowVelocityX = 0;
+        let flowVelocityZ = 0;
+        if (waterContact.flowMagnitude > 0) {
+          const flowAcceleration = ITEM_WATER_FLOW_ACCELERATION * waterContact.flowMagnitude;
+          flowVelocityX += waterContact.flowX * flowAcceleration * dt;
+          flowVelocityZ += waterContact.flowZ * flowAcceleration * dt;
+        }
+        if (waterContact.outflowMagnitude > 0) {
+          const outflowAcceleration = ITEM_WATER_OUTFLOW_ACCELERATION * waterContact.outflowMagnitude;
+          flowVelocityX += waterContact.outflowX * outflowAcceleration * dt;
+          flowVelocityZ += waterContact.outflowZ * outflowAcceleration * dt;
+        }
+        item.velocity[0] += flowVelocityX;
+        item.velocity[2] += flowVelocityZ;
+
+        const outflowImpulseX = waterContact.outflowX * waterContact.outflowMagnitude;
+        const outflowImpulseZ = waterContact.outflowZ * waterContact.outflowMagnitude;
+        const outflowImpulseMagnitude = Math.hypot(outflowImpulseX, outflowImpulseZ);
+        if (outflowImpulseMagnitude > 0.0001) {
+          item.waterOutflowExitImpulse[0] =
+            (outflowImpulseX / outflowImpulseMagnitude) *
+            (outflowImpulseMagnitude * ITEM_WATER_OUTFLOW_EXIT_IMPULSE_SCALE);
+          item.waterOutflowExitImpulse[1] =
+            (outflowImpulseZ / outflowImpulseMagnitude) *
+            (outflowImpulseMagnitude * ITEM_WATER_OUTFLOW_EXIT_IMPULSE_SCALE);
+        } else {
+          item.waterOutflowExitImpulse[0] *= 0.5;
+          item.waterOutflowExitImpulse[1] *= 0.5;
+        }
         item.velocity[1] -= 3.5 * dt;
         if (item.velocity[1] < -1.4) {
           item.velocity[1] = -1.4;
         }
       } else {
+        if (wasInWater) {
+          item.velocity[0] += item.waterOutflowExitImpulse[0];
+          item.velocity[2] += item.waterOutflowExitImpulse[1];
+        }
+        item.waterOutflowExitImpulse[0] *= 0.35;
+        item.waterOutflowExitImpulse[1] *= 0.35;
         item.velocity[1] -= gravity * dt;
       }
+      item.wasInWater = inWater;
 
       item.position[0] += item.velocity[0] * dt;
       item.position[1] += item.velocity[1] * dt;
@@ -1651,6 +1697,66 @@ export class Game {
       const yaw = item.ageMs * 0.0032;
       this.renderer.updateDroppedItem(id, item.position[0], item.position[1], item.position[2], yaw, bob);
     }
+  }
+
+  private sampleWaterContactAtPoint(
+    world: World,
+    x: number,
+    y: number,
+    z: number,
+  ): {
+    inWater: boolean;
+    flowX: number;
+    flowZ: number;
+    flowMagnitude: number;
+    outflowX: number;
+    outflowZ: number;
+    outflowMagnitude: number;
+  } {
+    const blockX = Math.floor(x);
+    const blockY = Math.floor(y);
+    const blockZ = Math.floor(z);
+    const blockId = world.getBlock(blockX, blockY, blockZ);
+    if (!isWaterBlock(blockId)) {
+      return {
+        inWater: false,
+        flowX: 0,
+        flowZ: 0,
+        flowMagnitude: 0,
+        outflowX: 0,
+        outflowZ: 0,
+        outflowMagnitude: 0,
+      };
+    }
+
+    const level = getWaterLevel(blockId);
+    const aboveBlock = world.getBlock(blockX, blockY + 1, blockZ);
+    const isPartialFlow = level !== null && !isWaterSource(blockId) && !isWaterBlock(aboveBlock);
+    if (isPartialFlow) {
+      const fluidTopY = blockY + waterLevelToSurfaceHeight(level);
+      if (y >= fluidTopY) {
+        return {
+          inWater: false,
+          flowX: 0,
+          flowZ: 0,
+          flowMagnitude: 0,
+          outflowX: 0,
+          outflowZ: 0,
+          outflowMagnitude: 0,
+        };
+      }
+    }
+
+    const flow = world.getFlowVectorForWaterCell(blockX, blockY, blockZ);
+    return {
+      inWater: true,
+      flowX: flow.x,
+      flowZ: flow.z,
+      flowMagnitude: flow.magnitude,
+      outflowX: flow.x,
+      outflowZ: flow.z,
+      outflowMagnitude: flow.edgeBoost,
+    };
   }
 
   private trackMovementStats(

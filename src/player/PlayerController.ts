@@ -8,6 +8,10 @@ import { PlayerPhysics } from './PlayerPhysics';
 import { isSolidBlock } from '../world/BlockRegistry';
 import type { World } from '../world/World';
 
+const WATER_FLOW_PUSH_SPEED = 0.98;
+const WATER_OUTFLOW_PUSH_SPEED = 0.46;
+const WATER_OUTFLOW_EXIT_IMPULSE_SCALE = 0.4;
+
 export interface PlayerFrameUpdate {
   jumped: boolean;
   sprinting: boolean;
@@ -28,6 +32,7 @@ export class PlayerController {
   private sprintCarryInAir = false;
   private allowHeldJump = false;
   private waterSurfaceRiseLockMs = 0;
+  private readonly waterOutflowExitImpulse: [number, number] = [0, 0];
   private readonly moveVector = new Vector3();
   private readonly upAxis = new Vector3(0, 1, 0);
   private readonly lookEuler = new Euler(0, 0, 0, 'YXZ');
@@ -101,6 +106,12 @@ export class PlayerController {
     this.inWater = waterState.inWater;
     if (!this.inWater) {
       this.waterSurfaceRiseLockMs = 0;
+      if (wasInWater) {
+        this.state.velocity[0] += this.waterOutflowExitImpulse[0];
+        this.state.velocity[2] += this.waterOutflowExitImpulse[1];
+      }
+      this.waterOutflowExitImpulse[0] *= 0.35;
+      this.waterOutflowExitImpulse[1] *= 0.35;
     }
 
     const localMove = new Vector3(moveX, 0, -moveForward);
@@ -176,6 +187,22 @@ export class PlayerController {
       localVelocity.applyAxisAngle(this.upAxis, this.state.yaw);
       this.state.velocity[0] = localVelocity.x;
       this.state.velocity[2] = localVelocity.z;
+      let flowVelocityX = 0;
+      let flowVelocityZ = 0;
+      if (waterState.flowMagnitude > 0) {
+        const flowPush = WATER_FLOW_PUSH_SPEED * waterState.flowMagnitude;
+        flowVelocityX += waterState.flowX * flowPush;
+        flowVelocityZ += waterState.flowZ * flowPush;
+      }
+      if (waterState.outflowMagnitude > 0) {
+        const outflowPush = WATER_OUTFLOW_PUSH_SPEED * waterState.outflowMagnitude;
+        flowVelocityX += waterState.outflowX * outflowPush;
+        flowVelocityZ += waterState.outflowZ * outflowPush;
+      }
+      this.state.velocity[0] += flowVelocityX;
+      this.state.velocity[2] += flowVelocityZ;
+      this.waterOutflowExitImpulse[0] = flowVelocityX * WATER_OUTFLOW_EXIT_IMPULSE_SCALE;
+      this.waterOutflowExitImpulse[1] = flowVelocityZ * WATER_OUTFLOW_EXIT_IMPULSE_SCALE;
 
       const sinkStrength = waterState.depthBlocks >= 2 ? 5.2 : 2.1;
       const justEnteredWater = !wasInWater && this.inWater;
@@ -363,6 +390,8 @@ export class PlayerController {
     this.state.velocity = [0, 0, 0];
     this.sprintCarryInAir = false;
     this.waterSurfaceRiseLockMs = 0;
+    this.waterOutflowExitImpulse[0] = 0;
+    this.waterOutflowExitImpulse[1] = 0;
   }
 
   setSelectedSlot(slotIndex: number): void {

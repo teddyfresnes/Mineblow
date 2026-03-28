@@ -61,7 +61,6 @@ interface AnimatedTileState {
 const TILE_SIZE = 16;
 const COLUMNS = 4;
 const MINECRAFT_TICK_SECONDS = 0.05;
-const WATER_STILL_TARGET_CYCLE_TICKS = 64;
 
 const tileKeys = [
   'grass_top',
@@ -499,13 +498,7 @@ export class TextureAtlas {
           const parsed = definition.animationMetaUrl
             ? await loadAnimationMeta(definition.animationMetaUrl)
             : null;
-          const hasExplicitFrames = !!parsed?.frames && parsed.frames.length > 0;
-          let timeline = resolveAnimationTimeline(frameCount, parsed);
-          if (key === 'water_still' && !hasExplicitFrames && timeline.length > 2) {
-            timeline = timeline.concat(timeline.slice(1, -1).reverse());
-            const frameTicks = Math.max(1, Math.round(WATER_STILL_TARGET_CYCLE_TICKS / timeline.length));
-            timeline = timeline.map((frame) => ({ ...frame, durationTicks: frameTicks }));
-          }
+          const timeline = resolveAnimationTimeline(frameCount, parsed);
           const initialFrame = timeline[0]?.index ?? 0;
           const animated: AnimatedTileState = {
             image,

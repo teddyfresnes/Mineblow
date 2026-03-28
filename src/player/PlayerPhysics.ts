@@ -1,5 +1,11 @@
 import { PLAYER_CONFIG } from '../game/Config';
-import { isSolidBlock, isWaterBlock } from '../world/BlockRegistry';
+import {
+  getWaterLevel,
+  isSolidBlock,
+  isWaterBlock,
+  isWaterSource,
+} from '../world/BlockRegistry';
+import { waterLevelToSurfaceHeight } from '../world/WaterSurface';
 import type { World } from '../world/World';
 
 export interface PhysicsResult {
@@ -11,10 +17,17 @@ export interface PhysicsResult {
 export interface WaterState {
   inWater: boolean;
   depthBlocks: number;
+  flowX: number;
+  flowZ: number;
+  flowMagnitude: number;
+  outflowX: number;
+  outflowZ: number;
+  outflowMagnitude: number;
 }
 
 const HALF_WIDTH = PLAYER_CONFIG.colliderWidth / 2;
 const HEIGHT = PLAYER_CONFIG.colliderHeight;
+const FLOW_CONTACT_EPSILON = 0.0001;
 
 const overlapsSolid = (world: World, position: [number, number, number]): boolean => {
   const minX = Math.floor(position[0] - HALF_WIDTH);
@@ -174,17 +187,92 @@ export class PlayerPhysics {
     const worldX = Math.floor(position[0]);
     const worldZ = Math.floor(position[2]);
     const feetY = Math.floor(position[1]);
-    let depth = 0;
+    const playerMinY = position[1];
+    const playerMaxY = position[1] + HEIGHT;
+    let fullDepthBlocks = 0;
+    let partialDepthBlocks = 0;
+    let flowX = 0;
+    let flowZ = 0;
+    let flowWeight = 0;
+    let outflowX = 0;
+    let outflowZ = 0;
+    let outflowWeight = 0;
 
     for (let offsetY = 0; offsetY <= Math.ceil(HEIGHT); offsetY += 1) {
-      if (isWaterBlock(world.getBlock(worldX, feetY + offsetY, worldZ))) {
-        depth += 1;
+      const blockY = feetY + offsetY;
+      const blockId = world.getBlock(worldX, blockY, worldZ);
+      if (!isWaterBlock(blockId)) {
+        continue;
+      }
+
+      let immersion = 1;
+      const level = getWaterLevel(blockId);
+      const aboveBlockId = world.getBlock(worldX, blockY + 1, worldZ);
+      const isPartialFlow = level !== null && !isWaterSource(blockId) && !isWaterBlock(aboveBlockId);
+      if (isPartialFlow) {
+        const fluidTopY = blockY + waterLevelToSurfaceHeight(level);
+        const overlap = Math.min(playerMaxY, fluidTopY) - Math.max(playerMinY, blockY);
+        if (overlap <= FLOW_CONTACT_EPSILON) {
+          continue;
+        }
+        immersion = Math.min(1, overlap);
+        partialDepthBlocks += immersion;
+      } else {
+        // Preserve legacy behavior for full water blocks exactly (source or stacked flow).
+        fullDepthBlocks += 1;
+      }
+
+      const flow = world.getFlowVectorForWaterCell(worldX, blockY, worldZ);
+      if (flow.magnitude > 0) {
+        const weightedFlow = immersion * flow.magnitude;
+        flowX += flow.x * weightedFlow;
+        flowZ += flow.z * weightedFlow;
+        flowWeight += weightedFlow;
+      }
+      if (flow.edgeBoost > 0) {
+        const weightedOutflow = immersion * flow.edgeBoost;
+        outflowX += flow.x * weightedOutflow;
+        outflowZ += flow.z * weightedOutflow;
+        outflowWeight += weightedOutflow;
+      }
+    }
+
+    const depth = fullDepthBlocks + partialDepthBlocks;
+    let flowMagnitude = 0;
+    if (flowWeight > 0) {
+      const magnitude = Math.hypot(flowX, flowZ);
+      if (magnitude > FLOW_CONTACT_EPSILON) {
+        flowX /= magnitude;
+        flowZ /= magnitude;
+        flowMagnitude = Math.min(1, magnitude / flowWeight);
+      } else {
+        flowX = 0;
+        flowZ = 0;
+      }
+    }
+
+    let outflowMagnitude = 0;
+    if (outflowWeight > 0) {
+      const magnitude = Math.hypot(outflowX, outflowZ);
+      if (magnitude > FLOW_CONTACT_EPSILON) {
+        outflowX /= magnitude;
+        outflowZ /= magnitude;
+        outflowMagnitude = Math.min(1, magnitude / outflowWeight);
+      } else {
+        outflowX = 0;
+        outflowZ = 0;
       }
     }
 
     return {
       inWater: depth > 0,
       depthBlocks: depth,
+      flowX,
+      flowZ,
+      flowMagnitude,
+      outflowX,
+      outflowZ,
+      outflowMagnitude,
     };
   }
 

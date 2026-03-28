@@ -338,6 +338,95 @@ export class World {
     return this.generator.getSurfaceHeight(worldX, worldZ);
   }
 
+  getFlowVectorForWaterCell(
+    worldX: number,
+    worldY: number,
+    worldZ: number,
+  ): { x: number; z: number; magnitude: number; edgeBoost: number } {
+    const blockId = this.getBlockIfLoaded(worldX, worldY, worldZ);
+    if (blockId === null || !isWaterBlock(blockId) || isWaterSource(blockId)) {
+      return { x: 0, z: 0, magnitude: 0, edgeBoost: 0 };
+    }
+
+    const currentLevel = getWaterLevel(blockId);
+    if (currentLevel === null) {
+      return { x: 0, z: 0, magnitude: 0, edgeBoost: 0 };
+    }
+
+    let vectorX = 0;
+    let vectorZ = 0;
+    for (const [offsetX, offsetZ] of FLUID_HORIZONTAL_OFFSETS) {
+      const neighborX = worldX + offsetX;
+      const neighborZ = worldZ + offsetZ;
+      const neighbor = this.getBlockIfLoaded(neighborX, worldY, neighborZ);
+      if (neighbor === null) {
+        continue;
+      }
+
+      const neighborLevel = getWaterLevel(neighbor);
+      if (neighborLevel !== null) {
+        const delta = neighborLevel - currentLevel;
+        vectorX += offsetX * delta;
+        vectorZ += offsetZ * delta;
+        continue;
+      }
+
+      if (!this.canWaterOccupy(neighbor)) {
+        continue;
+      }
+
+      const belowNeighbor = this.getBlockIfLoaded(neighborX, worldY - 1, neighborZ);
+      if (belowNeighbor === null) {
+        continue;
+      }
+
+      const belowLevel = getWaterLevel(belowNeighbor);
+      if (belowLevel !== null) {
+        const delta = belowLevel - (currentLevel - 8);
+        vectorX += offsetX * delta;
+        vectorZ += offsetZ * delta;
+        continue;
+      }
+
+      if (this.canWaterOccupy(belowNeighbor)) {
+        const delta = 8 - currentLevel;
+        vectorX += offsetX * delta;
+        vectorZ += offsetZ * delta;
+      }
+    }
+
+    const magnitude = Math.hypot(vectorX, vectorZ);
+    if (magnitude <= 0.0001) {
+      return { x: 0, z: 0, magnitude: 0, edgeBoost: 0 };
+    }
+
+    const normalizedX = vectorX / magnitude;
+    const normalizedZ = vectorZ / magnitude;
+    let edgeBoost = 0;
+    if (currentLevel === WATER_FLOW_LEVEL_MAX) {
+      for (const [offsetX, offsetZ] of FLUID_HORIZONTAL_OFFSETS) {
+        const alignment = offsetX * normalizedX + offsetZ * normalizedZ;
+        if (alignment < 0.6) {
+          continue;
+        }
+
+        const next = this.getBlockIfLoaded(worldX + offsetX, worldY, worldZ + offsetZ);
+        if (next === null || isWaterBlock(next) || !this.canWaterOccupy(next)) {
+          continue;
+        }
+
+        edgeBoost = Math.max(edgeBoost, alignment);
+      }
+    }
+
+    return {
+      x: normalizedX,
+      z: normalizedZ,
+      magnitude: 1,
+      edgeBoost,
+    };
+  }
+
   getChunkByKey(chunkKey: string): Chunk | undefined {
     return this.chunkStore.get(chunkKey);
   }

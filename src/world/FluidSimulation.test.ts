@@ -83,6 +83,32 @@ describe('World fluid simulation', () => {
     world.dispose();
   });
 
+  it('computes a horizontal current vector aligned with directed flow blocks', () => {
+    const world = new World('fluid-current-vector');
+    world.primeAround(0, 0, 0);
+
+    fillBox(world, 0, 15, 30, 32, 0, 15, 0);
+    fillBox(world, 0, 15, 30, 30, 0, 15, 3);
+    for (let x = 0; x <= 15; x += 1) {
+      world.setBlock(x, 31, 3, 3);
+      world.setBlock(x, 31, 5, 3);
+    }
+    world.setBlock(3, 31, 4, 3);
+    world.setBlock(4, 31, 4, 10);
+
+    runFluidTicks(world, 80);
+
+    const flow = world.getFlowVectorForWaterCell(6, 31, 4);
+    expect(flow.magnitude).toBeGreaterThan(0);
+    expect(flow.x).toBeGreaterThan(0.7);
+    expect(Math.abs(flow.z)).toBeLessThan(0.2);
+
+    const tailFlow = world.getFlowVectorForWaterCell(11, 31, 4);
+    expect(tailFlow.magnitude).toBeGreaterThan(0);
+    expect(tailFlow.edgeBoost).toBeGreaterThan(0.4);
+    world.dispose();
+  });
+
   it('retracts flows when the source is removed', () => {
     const world = new World('fluid-retract');
     world.primeAround(0, 0, 0);
