@@ -48,10 +48,15 @@ const HELD_ITEM_ROT_Y = -0.52;
 const HELD_ITEM_ROT_Z = 0.18;
 const WATER_TINT_COLOR = new Color('#3f76e4');
 const WATER_OPACITY = 0.82;
-const WATER_TINT_STRENGTH = 0.44;
-const WATER_LUMA_BLEND = 0.26;
-const WATER_CONTRAST = 0.86;
-const WATER_EMISSIVE_INTENSITY = 0.12;
+const WATER_TINT_STRENGTH = 0.32;
+const WATER_TOP_TINT_BOOST = 0.2;
+const WATER_LUMA_BLEND = 0.08;
+const WATER_CONTRAST = 0.97;
+const WATER_EMISSIVE_INTENSITY = 0.1;
+const AIR_FOG_COLOR = '#95b9dd';
+const AIR_FOG_NEAR = 60;
+const AIR_FOG_FAR = 190;
+const AIR_EXPOSURE = 1.03;
 
 export type FirstPersonAnimationPreset = 'hand' | 'item';
 
@@ -162,10 +167,10 @@ export class Renderer {
     this.renderer.shadowMap.type = PCFSoftShadowMap;
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.03;
+    this.renderer.toneMappingExposure = AIR_EXPOSURE;
     this.renderer.setClearColor(new Color(WORLD_CONFIG.skyColor));
     this.scene.background = new Color(WORLD_CONFIG.skyColor);
-    this.scene.fog = new Fog(new Color('#95b9dd'), 60, 190);
+    this.scene.fog = new Fog(new Color(AIR_FOG_COLOR), AIR_FOG_NEAR, AIR_FOG_FAR);
     const atlasMap = this.atlas.material.map;
     if (!atlasMap) {
       throw new Error('Texture atlas map is missing.');
@@ -186,6 +191,7 @@ export class Renderer {
     this.waterMaterial.onBeforeCompile = (shader) => {
       shader.uniforms.uWaterTint = { value: WATER_TINT_COLOR.clone() };
       shader.uniforms.uWaterTintStrength = { value: WATER_TINT_STRENGTH };
+      shader.uniforms.uWaterTopTintBoost = { value: WATER_TOP_TINT_BOOST };
       shader.uniforms.uWaterLumaBlend = { value: WATER_LUMA_BLEND };
       shader.uniforms.uWaterContrast = { value: WATER_CONTRAST };
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -193,6 +199,7 @@ export class Renderer {
         `#include <common>
 uniform vec3 uWaterTint;
 uniform float uWaterTintStrength;
+uniform float uWaterTopTintBoost;
 uniform float uWaterLumaBlend;
 uniform float uWaterContrast;
 `,
@@ -203,11 +210,13 @@ uniform float uWaterContrast;
 vec3 waterLuma = vec3(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)));
 diffuseColor.rgb = mix(diffuseColor.rgb, waterLuma, uWaterLumaBlend);
 diffuseColor.rgb = mix(diffuseColor.rgb, uWaterTint, uWaterTintStrength);
+float waterTopFaceMask = smoothstep(0.72, 0.95, normalize(vNormal).y);
+diffuseColor.rgb = mix(diffuseColor.rgb, uWaterTint, waterTopFaceMask * uWaterTopTintBoost);
 diffuseColor.rgb = mix(vec3(0.5), diffuseColor.rgb, uWaterContrast);
 `,
       );
     };
-    this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v1';
+    this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v2';
     this.scene.add(this.sky.group);
     this.scene.add(this.camera);
     this.handScene.add(this.handCamera);
