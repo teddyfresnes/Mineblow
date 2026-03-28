@@ -50,6 +50,8 @@ const WATER_TINT_COLOR = new Color('#3f76e4');
 const WATER_OPACITY = 0.82;
 const WATER_TINT_STRENGTH = 0.32;
 const WATER_TOP_TINT_BOOST = 0.2;
+const WATER_TOP_ALPHA_BOOST = 0.1;
+const WATER_TOP_ALPHA_GRAZE_BOOST = 0.18;
 const WATER_LUMA_BLEND = 0.08;
 const WATER_CONTRAST = 0.97;
 const WATER_EMISSIVE_INTENSITY = 0.1;
@@ -192,6 +194,8 @@ export class Renderer {
       shader.uniforms.uWaterTint = { value: WATER_TINT_COLOR.clone() };
       shader.uniforms.uWaterTintStrength = { value: WATER_TINT_STRENGTH };
       shader.uniforms.uWaterTopTintBoost = { value: WATER_TOP_TINT_BOOST };
+      shader.uniforms.uWaterTopAlphaBoost = { value: WATER_TOP_ALPHA_BOOST };
+      shader.uniforms.uWaterTopAlphaGrazeBoost = { value: WATER_TOP_ALPHA_GRAZE_BOOST };
       shader.uniforms.uWaterLumaBlend = { value: WATER_LUMA_BLEND };
       shader.uniforms.uWaterContrast = { value: WATER_CONTRAST };
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -200,6 +204,8 @@ export class Renderer {
 uniform vec3 uWaterTint;
 uniform float uWaterTintStrength;
 uniform float uWaterTopTintBoost;
+uniform float uWaterTopAlphaBoost;
+uniform float uWaterTopAlphaGrazeBoost;
 uniform float uWaterLumaBlend;
 uniform float uWaterContrast;
 `,
@@ -212,11 +218,14 @@ diffuseColor.rgb = mix(diffuseColor.rgb, waterLuma, uWaterLumaBlend);
 diffuseColor.rgb = mix(diffuseColor.rgb, uWaterTint, uWaterTintStrength);
 float waterTopFaceMask = smoothstep(0.72, 0.95, normalize(vNormal).y);
 diffuseColor.rgb = mix(diffuseColor.rgb, uWaterTint, waterTopFaceMask * uWaterTopTintBoost);
+float waterTopViewFacing = clamp(abs(dot(normalize(vNormal), normalize(vViewPosition))), 0.0, 1.0);
+float waterTopSurfaceOpacity = waterTopFaceMask * (uWaterTopAlphaBoost + (1.0 - waterTopViewFacing) * uWaterTopAlphaGrazeBoost);
 diffuseColor.rgb = mix(vec3(0.5), diffuseColor.rgb, uWaterContrast);
+diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity);
 `,
       );
     };
-    this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v2';
+    this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v3';
     this.scene.add(this.sky.group);
     this.scene.add(this.camera);
     this.handScene.add(this.handCamera);
