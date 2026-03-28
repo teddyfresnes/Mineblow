@@ -46,6 +46,12 @@ const HELD_ITEM_POS_Z = 0.28;
 const HELD_ITEM_ROT_X = 0.86;
 const HELD_ITEM_ROT_Y = -0.52;
 const HELD_ITEM_ROT_Z = 0.18;
+const WATER_TINT_COLOR = new Color('#3f76e4');
+const WATER_OPACITY = 0.82;
+const WATER_TINT_STRENGTH = 0.44;
+const WATER_LUMA_BLEND = 0.26;
+const WATER_CONTRAST = 0.86;
+const WATER_EMISSIVE_INTENSITY = 0.12;
 
 export type FirstPersonAnimationPreset = 'hand' | 'item';
 
@@ -169,11 +175,39 @@ export class Renderer {
     this.atlas.material.depthWrite = true;
     this.waterMaterial = new MeshLambertMaterial({
       map: atlasMap,
+      color: WATER_TINT_COLOR.clone(),
+      emissive: WATER_TINT_COLOR.clone().multiplyScalar(0.24),
+      emissiveIntensity: WATER_EMISSIVE_INTENSITY,
       transparent: true,
-      opacity: 1,
+      opacity: WATER_OPACITY,
       depthWrite: false,
       alphaTest: 0.01,
     });
+    this.waterMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.uWaterTint = { value: WATER_TINT_COLOR.clone() };
+      shader.uniforms.uWaterTintStrength = { value: WATER_TINT_STRENGTH };
+      shader.uniforms.uWaterLumaBlend = { value: WATER_LUMA_BLEND };
+      shader.uniforms.uWaterContrast = { value: WATER_CONTRAST };
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+uniform vec3 uWaterTint;
+uniform float uWaterTintStrength;
+uniform float uWaterLumaBlend;
+uniform float uWaterContrast;
+`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+vec3 waterLuma = vec3(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)));
+diffuseColor.rgb = mix(diffuseColor.rgb, waterLuma, uWaterLumaBlend);
+diffuseColor.rgb = mix(diffuseColor.rgb, uWaterTint, uWaterTintStrength);
+diffuseColor.rgb = mix(vec3(0.5), diffuseColor.rgb, uWaterContrast);
+`,
+      );
+    };
+    this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v1';
     this.scene.add(this.sky.group);
     this.scene.add(this.camera);
     this.handScene.add(this.handCamera);

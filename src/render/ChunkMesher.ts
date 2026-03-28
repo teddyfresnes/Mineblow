@@ -21,6 +21,19 @@ type Face = {
   texture: 'top' | 'bottom' | 'side';
 };
 
+type Rect = {
+  u0: number;
+  v0: number;
+  u1: number;
+  v1: number;
+};
+
+export type WaterTopFlow = {
+  x: number;
+  z: number;
+  magnitude: number;
+};
+
 const FACES: Face[] = [
   {
     normal: [1, 0, 0],
@@ -86,6 +99,14 @@ const FACES: Face[] = [
 
 export const WATER_SURFACE_BASE_HEIGHT = 0.86;
 export const WATER_SURFACE_MIN_HEIGHT = 0.125;
+export const WATER_TOP_FLOW_MIN_MAGNITUDE = 0.03;
+const WATER_TOP_FLOW_UV_SCALE = 0.5;
+const WATER_TOP_BASE_COORDS: Array<[number, number]> = [
+  [0, 1],
+  [0, 0],
+  [1, 0],
+  [1, 1],
+];
 
 export const waterLevelToSurfaceHeight = (level: number): number => {
   if (!Number.isFinite(level) || level <= 0) {
@@ -120,6 +141,56 @@ export const smoothWaterCornerHeight = (
 
 export const shouldRenderWaterTopFace = (aboveBlockId: BlockId): boolean =>
   !isWaterBlock(aboveBlockId);
+
+export const computeWaterTopFlow = (
+  cornerH00: number,
+  cornerH10: number,
+  cornerH11: number,
+  cornerH01: number,
+): WaterTopFlow => {
+  if (
+    !Number.isFinite(cornerH00) ||
+    !Number.isFinite(cornerH10) ||
+    !Number.isFinite(cornerH11) ||
+    !Number.isFinite(cornerH01)
+  ) {
+    return { x: 0, z: 0, magnitude: 0 };
+  }
+
+  const slopeX = ((cornerH10 + cornerH11) - (cornerH00 + cornerH01)) * 0.5;
+  const slopeZ = ((cornerH01 + cornerH11) - (cornerH00 + cornerH10)) * 0.5;
+  const x = -slopeX;
+  const z = -slopeZ;
+  const magnitude = Math.hypot(x, z);
+  return { x, z, magnitude };
+};
+
+const mapTopUvToRect = (rect: Rect, s: number, t: number): [number, number] => [
+  rect.u0 + (rect.u1 - rect.u0) * s,
+  rect.v0 + (rect.v1 - rect.v0) * t,
+];
+
+export const buildWaterTopUvs = (
+  rect: Rect,
+  flow: WaterTopFlow,
+): Array<[number, number]> => {
+  if (flow.magnitude <= WATER_TOP_FLOW_MIN_MAGNITUDE) {
+    return WATER_TOP_BASE_COORDS.map(([s, t]) => mapTopUvToRect(rect, s, t));
+  }
+
+  const angle = Math.atan2(flow.z, flow.x) - Math.PI / 2;
+  const sin = Math.sin(angle);
+  const cos = Math.cos(angle);
+  const scale = WATER_TOP_FLOW_UV_SCALE;
+
+  return WATER_TOP_BASE_COORDS.map(([s, t]) => {
+    const offsetS = (s - 0.5) * scale;
+    const offsetT = (t - 0.5) * scale;
+    const rotatedS = 0.5 + offsetS * cos - offsetT * sin;
+    const rotatedT = 0.5 + offsetS * sin + offsetT * cos;
+    return mapTopUvToRect(rect, rotatedS, rotatedT);
+  });
+};
 
 export class ChunkMesher {
   static buildGeometry(chunk: Chunk, world: World, atlas: TextureAtlas): BufferGeometry {
@@ -326,6 +397,11 @@ export class ChunkMesher {
       ],
       currentHeight,
     );
+
+    const topFlow = computeWaterTopFlow(cornerH00, cornerH10, cornerH11, cornerH01);
+    const topRect = topFlow.magnitude > WATER_TOP_FLOW_MIN_MAGNITUDE ? sideRect : stillTopRect;
+    const topUvs = buildWaterTopUvs(topRect, topFlow);
+
     if (shouldRenderWaterTopFace(aboveId) && !ChunkMesher.isOpaqueOccluder(aboveId)) {
       ChunkMesher.pushQuad(
         positions,
@@ -338,12 +414,7 @@ export class ChunkMesher {
           [x, y + cornerH00, z],
         ],
         [0, 1, 0],
-        [
-          [stillTopRect.u0, stillTopRect.v1],
-          [stillTopRect.u0, stillTopRect.v0],
-          [stillTopRect.u1, stillTopRect.v0],
-          [stillTopRect.u1, stillTopRect.v1],
-        ],
+        topUvs,
       );
     }
 
