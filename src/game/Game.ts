@@ -17,7 +17,7 @@ import {
 import { InputController } from '../player/InputController';
 import { PlayerController, type PlayerFrameUpdate } from '../player/PlayerController';
 import { SpawnResolver } from '../player/SpawnResolver';
-import { ChunkMesher } from '../render/ChunkMesher';
+import { ChunkMesher, waterLevelToSurfaceHeight } from '../render/ChunkMesher';
 import { Renderer } from '../render/Renderer';
 import { SaveRepository, type LoadedWorld } from '../save/SaveRepository';
 import type { BlockId } from '../types/blocks';
@@ -41,6 +41,7 @@ import {
 } from '../ui/InventoryScreen';
 import { StartMenu } from '../ui/StartMenu';
 import {
+  getWaterLevel,
   getMineDurationMs,
   getUiBlockColor,
   isMineableBlock,
@@ -871,6 +872,7 @@ export class Game {
       const cameraPosition = this.session.player.getCameraPosition();
       const rotation = this.session.player.getRotation();
       this.renderer.setCameraTransform(cameraPosition, rotation.yaw, rotation.pitch);
+      this.renderer.setUnderwaterView(this.isCameraUnderwater(cameraPosition, this.session.world));
     }
 
     const now = performance.now();
@@ -885,6 +887,28 @@ export class Game {
 
     this.renderer.render();
     this.capturePendingWorldPreview();
+  }
+
+  private isCameraUnderwater(
+    cameraPosition: { x: number; y: number; z: number },
+    world: World,
+  ): boolean {
+    const blockX = Math.floor(cameraPosition.x);
+    const blockY = Math.floor(cameraPosition.y);
+    const blockZ = Math.floor(cameraPosition.z);
+    const blockAtCamera = world.getBlock(blockX, blockY, blockZ);
+    if (!isWaterBlock(blockAtCamera)) {
+      return false;
+    }
+
+    const blockAbove = world.getBlock(blockX, blockY + 1, blockZ);
+    if (isWaterBlock(blockAbove)) {
+      return true;
+    }
+
+    const waterLevel = getWaterLevel(blockAtCamera) ?? 0;
+    const waterSurfaceY = blockY + waterLevelToSurfaceHeight(waterLevel);
+    return cameraPosition.y < waterSurfaceY;
   }
 
   private updateCanvasVisibility(): void {

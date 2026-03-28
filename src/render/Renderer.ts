@@ -59,6 +59,10 @@ const AIR_FOG_COLOR = '#95b9dd';
 const AIR_FOG_NEAR = 60;
 const AIR_FOG_FAR = 190;
 const AIR_EXPOSURE = 1.03;
+const UNDERWATER_FOG_COLOR = '#284f7a';
+const UNDERWATER_FOG_NEAR = 6;
+const UNDERWATER_FOG_FAR = 42;
+const UNDERWATER_EXPOSURE = 0.78;
 
 export type FirstPersonAnimationPreset = 'hand' | 'item';
 
@@ -135,9 +139,13 @@ export class Renderer {
     maxLifeMs: number;
   }> = [];
   private readonly lights: SceneLights;
+  private readonly sceneFog: Fog;
+  private readonly airFogColor = new Color(AIR_FOG_COLOR);
+  private readonly underwaterFogColor = new Color(UNDERWATER_FOG_COLOR);
   private readonly miningOverlay: Mesh;
   private readonly handRig = new Group();
   private readonly heldItemAnchor = new Group();
+  private underwaterViewEnabled = false;
   private handModel: Group | null = null;
   private heldItemMesh: Mesh | null = null;
   private heldBlockId: BlockId | null = null;
@@ -172,7 +180,8 @@ export class Renderer {
     this.renderer.toneMappingExposure = AIR_EXPOSURE;
     this.renderer.setClearColor(new Color(WORLD_CONFIG.skyColor));
     this.scene.background = new Color(WORLD_CONFIG.skyColor);
-    this.scene.fog = new Fog(new Color(AIR_FOG_COLOR), AIR_FOG_NEAR, AIR_FOG_FAR);
+    this.sceneFog = new Fog(this.airFogColor.clone(), AIR_FOG_NEAR, AIR_FOG_FAR);
+    this.scene.fog = this.sceneFog;
     const atlasMap = this.atlas.material.map;
     if (!atlasMap) {
       throw new Error('Texture atlas map is missing.');
@@ -475,6 +484,19 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity);
       this.handCamera.fov = nextFov;
       this.handCamera.updateProjectionMatrix();
     }
+  }
+
+  setUnderwaterView(enabled: boolean): void {
+    if (this.underwaterViewEnabled === enabled) {
+      return;
+    }
+
+    this.underwaterViewEnabled = enabled;
+    const fogColor = enabled ? this.underwaterFogColor : this.airFogColor;
+    this.sceneFog.color.copy(fogColor);
+    this.sceneFog.near = enabled ? UNDERWATER_FOG_NEAR : AIR_FOG_NEAR;
+    this.sceneFog.far = enabled ? UNDERWATER_FOG_FAR : AIR_FOG_FAR;
+    this.renderer.toneMappingExposure = enabled ? UNDERWATER_EXPOSURE : AIR_EXPOSURE;
   }
 
   spawnDroppedItem(itemId: string, blockId: BlockId, x: number, y: number, z: number): void {
