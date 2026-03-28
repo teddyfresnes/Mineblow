@@ -71,6 +71,11 @@ interface DroppedItem {
   pickupDelayMs: number;
 }
 
+interface UnderwaterViewState {
+  enabled: boolean;
+  depth: number;
+}
+
 const EMPTY_CURSOR: InventorySlot = {
   blockId: null,
   count: 0,
@@ -85,6 +90,7 @@ const WORLD_PREVIEW_SIZE = 256;
 const DROP_PICKUP_DELAY_MS = 2000;
 const PAUSE_MENU_KEY = 'KeyP';
 const CHUNK_MESH_SYNC_BUDGET_MS = 2;
+const UNDERWATER_SURFACE_SCAN_MAX_BLOCKS = 160;
 
 export class Game {
   private readonly shell = document.createElement('div');
@@ -872,7 +878,8 @@ export class Game {
       const cameraPosition = this.session.player.getCameraPosition();
       const rotation = this.session.player.getRotation();
       this.renderer.setCameraTransform(cameraPosition, rotation.yaw, rotation.pitch);
-      this.renderer.setUnderwaterView(this.isCameraUnderwater(cameraPosition, this.session.world));
+      const underwaterState = this.getCameraUnderwaterState(cameraPosition, this.session.world);
+      this.renderer.setUnderwaterView(underwaterState.enabled, underwaterState.depth);
     }
 
     const now = performance.now();
@@ -889,26 +896,37 @@ export class Game {
     this.capturePendingWorldPreview();
   }
 
-  private isCameraUnderwater(
+  private getCameraUnderwaterState(
     cameraPosition: { x: number; y: number; z: number },
     world: World,
-  ): boolean {
+  ): UnderwaterViewState {
     const blockX = Math.floor(cameraPosition.x);
     const blockY = Math.floor(cameraPosition.y);
     const blockZ = Math.floor(cameraPosition.z);
     const blockAtCamera = world.getBlock(blockX, blockY, blockZ);
     if (!isWaterBlock(blockAtCamera)) {
-      return false;
+      return { enabled: false, depth: 0 };
     }
 
-    const blockAbove = world.getBlock(blockX, blockY + 1, blockZ);
-    if (isWaterBlock(blockAbove)) {
-      return true;
+    let topWaterY = blockY;
+    for (let step = 0; step < UNDERWATER_SURFACE_SCAN_MAX_BLOCKS; step += 1) {
+      const aboveY = topWaterY + 1;
+      const aboveBlock = world.getBlock(blockX, aboveY, blockZ);
+      if (!isWaterBlock(aboveBlock)) {
+        break;
+      }
+      topWaterY = aboveY;
     }
 
-    const waterLevel = getWaterLevel(blockAtCamera) ?? 0;
-    const waterSurfaceY = blockY + waterLevelToSurfaceHeight(waterLevel);
-    return cameraPosition.y < waterSurfaceY;
+    const topWaterBlock = world.getBlock(blockX, topWaterY, blockZ);
+    const waterLevel = getWaterLevel(topWaterBlock) ?? 0;
+    const waterSurfaceY = topWaterY + waterLevelToSurfaceHeight(waterLevel);
+    const depth = waterSurfaceY - cameraPosition.y;
+    if (depth <= 0.001) {
+      return { enabled: false, depth: 0 };
+    }
+
+    return { enabled: true, depth };
   }
 
   private updateCanvasVisibility(): void {

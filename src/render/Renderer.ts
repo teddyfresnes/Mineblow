@@ -60,9 +60,19 @@ const AIR_FOG_NEAR = 60;
 const AIR_FOG_FAR = 190;
 const AIR_EXPOSURE = 1.03;
 const UNDERWATER_FOG_COLOR = '#284f7a';
+const UNDERWATER_DEEP_FOG_COLOR = '#0f2236';
 const UNDERWATER_FOG_NEAR = 6;
 const UNDERWATER_FOG_FAR = 42;
 const UNDERWATER_EXPOSURE = 0.78;
+const UNDERWATER_DEEP_FOG_NEAR = 1.8;
+const UNDERWATER_DEEP_FOG_FAR = 17;
+const UNDERWATER_DEEP_EXPOSURE = 0.48;
+const UNDERWATER_DEPTH_FOR_MAX_ATTENUATION = 28;
+const UNDERWATER_LIGHT_SCALE_SHALLOW = 0.68;
+const UNDERWATER_LIGHT_SCALE_DEEP = 0.34;
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+const lerp = (from: number, to: number, ratio: number): number => from + (to - from) * ratio;
 
 export type FirstPersonAnimationPreset = 'hand' | 'item';
 
@@ -142,10 +152,15 @@ export class Renderer {
   private readonly sceneFog: Fog;
   private readonly airFogColor = new Color(AIR_FOG_COLOR);
   private readonly underwaterFogColor = new Color(UNDERWATER_FOG_COLOR);
+  private readonly underwaterDeepFogColor = new Color(UNDERWATER_DEEP_FOG_COLOR);
+  private readonly airBackgroundColor = new Color(WORLD_CONFIG.skyColor);
+  private readonly fogMixColor = new Color();
   private readonly miningOverlay: Mesh;
   private readonly handRig = new Group();
   private readonly heldItemAnchor = new Group();
-  private underwaterViewEnabled = false;
+  private readonly baseAmbientIntensity: number;
+  private readonly baseSkyBounceIntensity: number;
+  private readonly baseSunIntensity: number;
   private handModel: Group | null = null;
   private heldItemMesh: Mesh | null = null;
   private heldBlockId: BlockId | null = null;
@@ -178,8 +193,8 @@ export class Renderer {
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = AIR_EXPOSURE;
-    this.renderer.setClearColor(new Color(WORLD_CONFIG.skyColor));
-    this.scene.background = new Color(WORLD_CONFIG.skyColor);
+    this.renderer.setClearColor(this.airBackgroundColor);
+    this.scene.background = this.airBackgroundColor;
     this.sceneFog = new Fog(this.airFogColor.clone(), AIR_FOG_NEAR, AIR_FOG_FAR);
     this.scene.fog = this.sceneFog;
     const atlasMap = this.atlas.material.map;
@@ -249,6 +264,9 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity);
     handKey.position.set(1.6, 2.2, 2.1);
     this.handScene.add(handAmbient, handKey);
     this.lights = addSceneLights(this.scene);
+    this.baseAmbientIntensity = this.lights.ambient.intensity;
+    this.baseSkyBounceIntensity = this.lights.skyBounce.intensity;
+    this.baseSunIntensity = this.lights.sun.intensity;
     updateSunForCamera(this.lights, 0, 0);
     void this.setPlayerSkin(null);
 
@@ -486,17 +504,40 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity);
     }
   }
 
-  setUnderwaterView(enabled: boolean): void {
-    if (this.underwaterViewEnabled === enabled) {
+  setUnderwaterView(enabled: boolean, depth = 0): void {
+    this.sky.group.visible = !enabled;
+    if (!enabled) {
+      this.sceneFog.color.copy(this.airFogColor);
+      this.sceneFog.near = AIR_FOG_NEAR;
+      this.sceneFog.far = AIR_FOG_FAR;
+      this.renderer.toneMappingExposure = AIR_EXPOSURE;
+      this.renderer.setClearColor(this.airBackgroundColor);
+      this.scene.background = this.airBackgroundColor;
+      this.lights.ambient.intensity = this.baseAmbientIntensity;
+      this.lights.skyBounce.intensity = this.baseSkyBounceIntensity;
+      this.lights.sun.intensity = this.baseSunIntensity;
       return;
     }
 
-    this.underwaterViewEnabled = enabled;
-    const fogColor = enabled ? this.underwaterFogColor : this.airFogColor;
+    const depthRatio = clamp01(depth / UNDERWATER_DEPTH_FOR_MAX_ATTENUATION);
+    const fogColor = this.fogMixColor
+      .copy(this.underwaterFogColor)
+      .lerp(this.underwaterDeepFogColor, depthRatio);
     this.sceneFog.color.copy(fogColor);
-    this.sceneFog.near = enabled ? UNDERWATER_FOG_NEAR : AIR_FOG_NEAR;
-    this.sceneFog.far = enabled ? UNDERWATER_FOG_FAR : AIR_FOG_FAR;
-    this.renderer.toneMappingExposure = enabled ? UNDERWATER_EXPOSURE : AIR_EXPOSURE;
+    this.sceneFog.near = lerp(UNDERWATER_FOG_NEAR, UNDERWATER_DEEP_FOG_NEAR, depthRatio);
+    this.sceneFog.far = lerp(UNDERWATER_FOG_FAR, UNDERWATER_DEEP_FOG_FAR, depthRatio);
+    this.renderer.toneMappingExposure = lerp(
+      UNDERWATER_EXPOSURE,
+      UNDERWATER_DEEP_EXPOSURE,
+      depthRatio,
+    );
+    this.renderer.setClearColor(this.sceneFog.color);
+    this.scene.background = this.sceneFog.color;
+
+    const lightScale = lerp(UNDERWATER_LIGHT_SCALE_SHALLOW, UNDERWATER_LIGHT_SCALE_DEEP, depthRatio);
+    this.lights.ambient.intensity = this.baseAmbientIntensity * lightScale;
+    this.lights.skyBounce.intensity = this.baseSkyBounceIntensity * lightScale * 0.82;
+    this.lights.sun.intensity = this.baseSunIntensity * lightScale * 0.7;
   }
 
   spawnDroppedItem(itemId: string, blockId: BlockId, x: number, y: number, z: number): void {
