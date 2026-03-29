@@ -29,6 +29,56 @@ const fillBox = (
 };
 
 describe('World fluid simulation', () => {
+  it('propagates vertically one block every 5 ticks', () => {
+    const world = new World('fluid-vanilla-vertical-propagation');
+    world.primeAround(0, 0, 0);
+
+    fillBox(world, 0, 15, 20, 32, 0, 15, 0);
+    fillBox(world, 0, 15, 20, 20, 0, 15, 3);
+    world.setBlock(6, 26, 6, 10);
+
+    runFluidTicks(world, 4);
+    expect(world.getBlock(6, 25, 6)).toBe(0);
+
+    runFluidTicks(world, 1);
+    expect(world.getBlock(6, 25, 6)).toBe(toFlowWaterId(1));
+
+    runFluidTicks(world, 4);
+    expect(world.getBlock(6, 24, 6)).toBe(0);
+
+    runFluidTicks(world, 1);
+    expect(world.getBlock(6, 24, 6)).toBe(toFlowWaterId(1));
+    world.dispose();
+  });
+
+  it('retracts vertically one block every 5 ticks after source removal', () => {
+    const world = new World('fluid-vanilla-vertical-retraction');
+    world.primeAround(0, 0, 0);
+
+    fillBox(world, 0, 15, 20, 32, 0, 15, 0);
+    fillBox(world, 0, 15, 20, 20, 0, 15, 3);
+    world.setBlock(6, 26, 6, 10);
+
+    runFluidTicks(world, 20);
+    expect(isWaterBlock(world.getBlock(6, 25, 6))).toBe(true);
+    expect(isWaterBlock(world.getBlock(6, 24, 6))).toBe(true);
+
+    world.setBlock(6, 26, 6, 0);
+
+    runFluidTicks(world, 4);
+    expect(isWaterBlock(world.getBlock(6, 25, 6))).toBe(true);
+
+    runFluidTicks(world, 1);
+    expect(world.getBlock(6, 25, 6)).toBe(0);
+
+    runFluidTicks(world, 4);
+    expect(isWaterBlock(world.getBlock(6, 24, 6))).toBe(true);
+
+    runFluidTicks(world, 1);
+    expect(world.getBlock(6, 24, 6)).toBe(0);
+    world.dispose();
+  });
+
   it('spreads laterally from a source and caps horizontal range to level 7', () => {
     const world = new World('fluid-lateral');
     world.primeAround(0, 0, 0);

@@ -29,6 +29,8 @@ interface CompletedChunk {
   blocks: Uint8Array;
 }
 
+type FluidCell = [number, number, number];
+
 const MAX_IN_FLIGHT_GENERATION = 2;
 const FLUID_HORIZONTAL_OFFSETS: Array<[number, number]> = [
   [1, 0],
@@ -53,6 +55,7 @@ const FLUID_INTERFACE_OFFSETS: Array<[number, number]> = [
   [0, 1],
   [0, -1],
 ];
+const FLUID_UPDATE_DELAY_TICKS = 5;
 
 export class World {
   readonly generator: TerrainGenerator;
@@ -70,8 +73,10 @@ export class World {
   private readonly chunkDiffs = new Map<string, Map<number, BlockId>>();
   private readonly diffDirtyKeys = new Set<string>();
   private readonly chunkGenerationDispatcher: ChunkGenerationDispatcher;
-  private readonly fluidQueue: Array<[number, number, number]> = [];
-  private readonly fluidQueuedKeys = new Set<string>();
+  private readonly fluidScheduledTicksByKey = new Map<string, number>();
+  private readonly fluidBuckets = new Map<number, FluidCell[]>();
+  private fluidCurrentTick = 0;
+  private fluidMinScheduledTick: number | null = null;
   private fluidTickAccumulator = 0;
 
   constructor(readonly seed: string, persistedDiffs?: Map<string, ChunkDiffRecord>) {
@@ -112,8 +117,10 @@ export class World {
     this.inFlightGeneration.clear();
     this.completedGenerationQueue.length = 0;
     this.completedGenerationKeys.clear();
-    this.fluidQueue.length = 0;
-    this.fluidQueuedKeys.clear();
+    this.fluidScheduledTicksByKey.clear();
+    this.fluidBuckets.clear();
+    this.fluidCurrentTick = 0;
+    this.fluidMinScheduledTick = null;
     this.fluidTickAccumulator = 0;
   }
 
@@ -307,6 +314,7 @@ export class World {
     }
 
     const local = worldToLocal(worldX, worldY, worldZ);
+    const previousBlockId = chunk.getBlock(local.x, local.y, local.z);
     const changed = chunk.setBlock(local.x, local.y, local.z, blockId);
     if (!changed) {
       return false;
@@ -330,7 +338,9 @@ export class World {
     this.queueMeshUpdate(chunk.key);
     this.diffDirtyKeys.add(chunk.key);
     this.markBoundaryNeighborsDirty(coord, local.x, local.z);
-    this.enqueueFluidNeighborhood(worldX, worldY, worldZ);
+    if (this.shouldScheduleFluidNeighborhood(worldX, worldY, worldZ, previousBlockId, blockId)) {
+      this.enqueueFluidNeighborhood(worldX, worldY, worldZ);
+    }
     return true;
   }
 
@@ -448,7 +458,7 @@ export class World {
     while (this.fluidTickAccumulator >= WORLD_CONFIG.fluidTickSeconds) {
       this.fluidTickAccumulator -= WORLD_CONFIG.fluidTickSeconds;
       this.processFluidTick(WORLD_CONFIG.fluidBudgetPerTick);
-      if (this.fluidQueue.length === 0) {
+      if (this.fluidScheduledTicksByKey.size === 0) {
         this.fluidTickAccumulator = 0;
         break;
       }
@@ -609,17 +619,62 @@ export class World {
   }
 
   private processFluidTick(budget: number): void {
+    this.fluidCurrentTick += 1;
     const cappedBudget = Math.max(0, Math.floor(budget));
-    for (let index = 0; index < cappedBudget; index += 1) {
-      const cell = this.fluidQueue.shift();
-      if (!cell) {
+    let processed = 0;
+
+    while (processed < cappedBudget) {
+      const dueTick = this.fluidMinScheduledTick;
+      if (dueTick === null || dueTick > this.fluidCurrentTick) {
         break;
       }
 
+      const bucket = this.fluidBuckets.get(dueTick);
+      if (!bucket || bucket.length === 0) {
+        this.fluidBuckets.delete(dueTick);
+        this.refreshFluidMinScheduledTick();
+        continue;
+      }
+
+      const cell = bucket.shift();
+      if (bucket.length === 0) {
+        this.fluidBuckets.delete(dueTick);
+        this.refreshFluidMinScheduledTick();
+      }
+      if (!cell) {
+        continue;
+      }
+
       const [worldX, worldY, worldZ] = cell;
-      this.fluidQueuedKeys.delete(`${worldX},${worldY},${worldZ}`);
+      const key = this.getFluidCellKey(worldX, worldY, worldZ);
+      const scheduledTick = this.fluidScheduledTicksByKey.get(key);
+      if (scheduledTick !== dueTick) {
+        continue;
+      }
+
+      this.fluidScheduledTicksByKey.delete(key);
       this.reevaluateFluidCell(worldX, worldY, worldZ);
+      processed += 1;
     }
+  }
+
+  private getFluidCellKey(worldX: number, worldY: number, worldZ: number): string {
+    return `${worldX},${worldY},${worldZ}`;
+  }
+
+  private refreshFluidMinScheduledTick(): void {
+    if (this.fluidBuckets.size === 0) {
+      this.fluidMinScheduledTick = null;
+      return;
+    }
+
+    let minTick: number | null = null;
+    for (const tick of this.fluidBuckets.keys()) {
+      if (minTick === null || tick < minTick) {
+        minTick = tick;
+      }
+    }
+    this.fluidMinScheduledTick = minTick;
   }
 
   private reevaluateFluidCell(worldX: number, worldY: number, worldZ: number): void {
@@ -811,6 +866,29 @@ export class World {
     return blockId === 0 || isPlantBlock(blockId) || (isWaterBlock(blockId) && !isWaterSource(blockId));
   }
 
+  private shouldScheduleFluidNeighborhood(
+    worldX: number,
+    worldY: number,
+    worldZ: number,
+    previousBlockId: BlockId,
+    nextBlockId: BlockId,
+  ): boolean {
+    if (isWaterBlock(previousBlockId) || isWaterBlock(nextBlockId)) {
+      return true;
+    }
+
+    for (const [offsetX, offsetY, offsetZ] of FLUID_NEIGHBORS) {
+      if (offsetX === 0 && offsetY === 0 && offsetZ === 0) {
+        continue;
+      }
+      const neighbor = this.getBlockIfLoaded(worldX + offsetX, worldY + offsetY, worldZ + offsetZ);
+      if (neighbor !== null && isWaterBlock(neighbor)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private getBlockIfLoaded(worldX: number, worldY: number, worldZ: number): BlockId | null {
     if (worldY < 0 || worldY >= WORLD_CONFIG.chunkSizeY) {
       return null;
@@ -826,7 +904,12 @@ export class World {
     return chunk.getBlock(local.x, local.y, local.z);
   }
 
-  private enqueueFluidCell(worldX: number, worldY: number, worldZ: number): void {
+  private enqueueFluidCell(
+    worldX: number,
+    worldY: number,
+    worldZ: number,
+    delayTicks = FLUID_UPDATE_DELAY_TICKS,
+  ): void {
     if (worldY < 0 || worldY >= WORLD_CONFIG.chunkSizeY) {
       return;
     }
@@ -834,18 +917,34 @@ export class World {
       return;
     }
 
-    const key = `${worldX},${worldY},${worldZ}`;
-    if (this.fluidQueuedKeys.has(key)) {
+    const key = this.getFluidCellKey(worldX, worldY, worldZ);
+    const dueTick = this.fluidCurrentTick + Math.max(0, Math.floor(delayTicks));
+    const existingDueTick = this.fluidScheduledTicksByKey.get(key);
+    if (existingDueTick !== undefined && existingDueTick <= dueTick) {
       return;
     }
 
-    this.fluidQueuedKeys.add(key);
-    this.fluidQueue.push([worldX, worldY, worldZ]);
+    this.fluidScheduledTicksByKey.set(key, dueTick);
+    const bucket = this.fluidBuckets.get(dueTick);
+    if (bucket) {
+      bucket.push([worldX, worldY, worldZ]);
+    } else {
+      this.fluidBuckets.set(dueTick, [[worldX, worldY, worldZ]]);
+    }
+
+    if (this.fluidMinScheduledTick === null || dueTick < this.fluidMinScheduledTick) {
+      this.fluidMinScheduledTick = dueTick;
+    }
   }
 
-  private enqueueFluidNeighborhood(worldX: number, worldY: number, worldZ: number): void {
+  private enqueueFluidNeighborhood(
+    worldX: number,
+    worldY: number,
+    worldZ: number,
+    delayTicks = FLUID_UPDATE_DELAY_TICKS,
+  ): void {
     for (const [offsetX, offsetY, offsetZ] of FLUID_NEIGHBORS) {
-      this.enqueueFluidCell(worldX + offsetX, worldY + offsetY, worldZ + offsetZ);
+      this.enqueueFluidCell(worldX + offsetX, worldY + offsetY, worldZ + offsetZ, delayTicks);
     }
   }
 
