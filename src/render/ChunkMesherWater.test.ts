@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildWaterTopUvs,
   computeWaterTopFlow,
+  propagateWaterCornerHeight,
   shouldRenderWaterTopFace,
   smoothWaterCornerHeight,
   waterLevelToSurfaceHeight,
@@ -27,6 +28,11 @@ describe('ChunkMesher water helpers', () => {
     const height = smoothWaterCornerHeight([1, 0.5, null, 0.25], 0.875);
     expect(height).toBeCloseTo((1 + 0.5 + 0.25) / 3, 6);
     expect(smoothWaterCornerHeight([null, null, null, null], 0.875)).toBeCloseTo(0.875, 6);
+  });
+
+  it('propagates corner height from the highest neighbor/source sample', () => {
+    expect(propagateWaterCornerHeight([0.86, 0.42, 0.24, null], 0.125)).toBeCloseTo(0.86, 6);
+    expect(propagateWaterCornerHeight([null, null, null, null], 0.125)).toBeCloseTo(0.125, 6);
   });
 
   it('derives a directional top flow vector from corner heights', () => {

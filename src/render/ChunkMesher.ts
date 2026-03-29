@@ -139,6 +139,24 @@ export const smoothWaterCornerHeight = (
   return sum / count;
 };
 
+export const propagateWaterCornerHeight = (
+  samples: Array<number | null>,
+  fallbackHeight: number,
+): number => {
+  let best = fallbackHeight;
+  let hasSample = false;
+  for (const sample of samples) {
+    if (sample === null) {
+      continue;
+    }
+    hasSample = true;
+    if (sample > best) {
+      best = sample;
+    }
+  }
+  return hasSample ? best : fallbackHeight;
+};
+
 export const shouldRenderWaterTopFace = (aboveBlockId: BlockId): boolean =>
   !isWaterBlock(aboveBlockId);
 
@@ -550,7 +568,7 @@ export class ChunkMesher {
         z + offsetZ,
       ),
     );
-    return smoothWaterCornerHeight(samples, fallbackHeight);
+    return propagateWaterCornerHeight(samples, fallbackHeight);
   }
 
   private static sampleWaterHeight(
