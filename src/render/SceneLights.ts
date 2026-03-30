@@ -1,4 +1,4 @@
-import { AmbientLight, DirectionalLight, HemisphereLight, Object3D, Scene } from 'three';
+import { AmbientLight, DirectionalLight, HemisphereLight, Object3D, Scene, Vector3 } from 'three';
 
 export interface SceneLights {
   ambient: AmbientLight;
@@ -6,6 +6,10 @@ export interface SceneLights {
   sun: DirectionalLight;
   sunTarget: Object3D;
 }
+
+export const SUN_DIRECTION = new Vector3(0.28, 0.82, 0.46).normalize();
+
+const SUN_LIGHT_DISTANCE = 100;
 
 export const addSceneLights = (scene: Scene): SceneLights => {
   const ambient = new AmbientLight('#e8f4ff', 0.3);
@@ -34,7 +38,11 @@ export const updateSunForCamera = (
   cameraX: number,
   cameraZ: number,
 ): void => {
-  lights.sun.position.set(cameraX + 52, 78, cameraZ + 34);
+  lights.sun.position.set(
+    cameraX + SUN_DIRECTION.x * SUN_LIGHT_DISTANCE,
+    SUN_DIRECTION.y * SUN_LIGHT_DISTANCE,
+    cameraZ + SUN_DIRECTION.z * SUN_LIGHT_DISTANCE,
+  );
   lights.sunTarget.position.set(cameraX, 12, cameraZ);
   lights.sunTarget.updateMatrixWorld();
 };

@@ -1,13 +1,26 @@
 import {
+  AdditiveBlending,
   BackSide,
+  ClampToEdgeWrapping,
   Color,
+  DoubleSide,
   Group,
+  LinearFilter,
   Mesh,
   MeshBasicMaterial,
+  PlaneGeometry,
+  SRGBColorSpace,
   ShaderMaterial,
   SphereGeometry,
+  TextureLoader,
   BoxGeometry,
 } from 'three';
+import { SUN_DIRECTION } from './SceneLights';
+
+const SUN_TEXTURE_URL = new URL('../../assets/textures/environment/sun.png', import.meta.url).href;
+const SUN_DISTANCE = 220;
+const SUN_SIZE = 40;
+const sunTextureLoader = new TextureLoader();
 
 export class SkyDome {
   readonly group = new Group();
@@ -19,7 +32,7 @@ export class SkyDome {
         topColor: { value: new Color('#7eb8f7') },
         horizonColor: { value: new Color('#c9e6ff') },
         bottomColor: { value: new Color('#f7ddb1') },
-        sunDirection: { value: { x: 0.28, y: 0.82, z: 0.46 } },
+        sunDirection: { value: SUN_DIRECTION.clone() },
       },
       vertexShader: `
         varying vec3 vWorldPosition;
@@ -41,12 +54,12 @@ export class SkyDome {
           vec3 color = mix(bottomColor, horizonColor, smoothstep(0.0, 0.45, h));
           color = mix(color, topColor, smoothstep(0.45, 1.0, h));
           float sunDot = max(dot(dir, normalize(sunDirection)), 0.0);
-          float sunDisc = smoothstep(0.992, 0.9994, sunDot);
+          float sunGlow = smoothstep(0.985, 0.9992, sunDot);
           float halo = pow(sunDot, 26.0);
           float rays = pow(sunDot, 9.0) * (0.5 + 0.5 * sin(atan(dir.x - sunDirection.x, dir.y - sunDirection.y) * 16.0));
-          color += vec3(1.0, 0.88, 0.62) * sunDisc * 0.95;
-          color += vec3(1.0, 0.82, 0.48) * halo * 0.3;
-          color += vec3(1.0, 0.86, 0.65) * rays * 0.08;
+          color += vec3(1.0, 0.88, 0.62) * sunGlow * 0.12;
+          color += vec3(1.0, 0.82, 0.48) * halo * 0.24;
+          color += vec3(1.0, 0.86, 0.65) * rays * 0.06;
           gl_FragColor = vec4(color, 1.0);
         }
       `,
@@ -56,6 +69,31 @@ export class SkyDome {
     const skySphere = new Mesh(new SphereGeometry(280, 24, 16), skyMaterial);
     skySphere.frustumCulled = false;
     this.group.add(skySphere);
+
+    const sunTexture = sunTextureLoader.load(SUN_TEXTURE_URL);
+    sunTexture.colorSpace = SRGBColorSpace;
+    sunTexture.generateMipmaps = false;
+    sunTexture.minFilter = LinearFilter;
+    sunTexture.magFilter = LinearFilter;
+    sunTexture.wrapS = ClampToEdgeWrapping;
+    sunTexture.wrapT = ClampToEdgeWrapping;
+
+    const sunMaterial = new MeshBasicMaterial({
+      map: sunTexture,
+      color: '#fff5d0',
+      transparent: true,
+      blending: AdditiveBlending,
+      side: DoubleSide,
+      fog: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const sun = new Mesh(new PlaneGeometry(SUN_SIZE, SUN_SIZE), sunMaterial);
+    sun.position.copy(SUN_DIRECTION).multiplyScalar(SUN_DISTANCE);
+    sun.lookAt(0, 0, 0);
+    sun.frustumCulled = false;
+    sun.renderOrder = 1;
+    this.group.add(sun);
 
     const cloudMaterial = new MeshBasicMaterial({
       color: '#ffffff',
