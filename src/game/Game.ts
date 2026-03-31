@@ -32,6 +32,7 @@ import {
 import type { VoxelHit } from '../types/world';
 import { debounce } from '../utils/debounce';
 import { setCurrentLanguage, translate } from '../i18n/Language';
+import { ChatOverlay, type ChatInputMode } from '../ui/ChatOverlay';
 import { DebugOverlay } from '../ui/DebugOverlay';
 import { Hud, type HotbarInteractEvent } from '../ui/Hud';
 import {
@@ -99,6 +100,10 @@ const ITEM_WATER_OUTFLOW_ACCELERATION = 2.1;
 const ITEM_WATER_OUTFLOW_EXIT_IMPULSE_SCALE = 0.84;
 const DAY_NIGHT_CYCLE_SECONDS = 20 * 60;
 const MOON_PHASE_COUNT = 8;
+const CHAT_COMMAND_TIMESET = 'timeset';
+const CHAT_CLOCK_HOUR_MIN = 1;
+const CHAT_CLOCK_HOUR_MAX = 24;
+const SUNRISE_CLOCK_HOUR = 8;
 
 export class Game {
   private readonly shell = document.createElement('div');
@@ -116,6 +121,7 @@ export class Game {
   private readonly input: InputController;
   private readonly menu: StartMenu;
   private readonly hud: Hud;
+  private readonly chat: ChatOverlay;
   private readonly debugOverlay: DebugOverlay;
   private readonly inventoryScreen: InventoryScreen;
   private readonly saveRepository = new SaveRepository();
@@ -160,6 +166,7 @@ export class Game {
   private hotbarDirty = false;
   private timeOfDay = 0;
   private moonPhase = 0;
+  private restorePointerLockAfterChat = false;
 
   constructor(private readonly root: HTMLElement) {
     this.shell.className = 'mineblow-shell';
@@ -207,6 +214,15 @@ export class Game {
         this.handleHudHotbarInteract(event);
       },
     });
+    this.chat = new ChatOverlay(this.shell, {
+      onSubmit: (mode, value) => {
+        this.handleChatSubmit(mode, value);
+      },
+      onCancel: () => {
+        this.closeChat();
+      },
+    });
+    this.chat.setVisible(false);
     this.debugOverlay = new DebugOverlay(this.shell);
     this.inventoryScreen = new InventoryScreen(this.shell, {
       onSlotInteract: (event) => {
@@ -250,6 +266,7 @@ export class Game {
     this.handleEscapeKeyDown = this.handleEscapeKeyDown.bind(this);
     setCurrentLanguage(this.settings.language);
     this.hud.setLanguage(this.settings.language);
+    this.chat.setLanguage(this.settings.language);
     this.inventoryScreen.setLanguage(this.settings.language);
     this.updateWorldLoadingLabel();
   }
@@ -296,6 +313,7 @@ export class Game {
     this.menu.setWorlds(worlds);
     this.hud.setHandSkin(settings.skinDataUrl);
     this.hud.setLanguage(this.settings.language);
+    this.chat.setLanguage(this.settings.language);
     this.inventoryScreen.setLanguage(this.settings.language);
     this.updateWorldLoadingLabel();
 
@@ -440,6 +458,9 @@ export class Game {
     this.session = null;
     this.pendingWorldPreviewCapture = null;
     this.input.exitPointerLock();
+    this.closeChat(false);
+    this.chat.clear();
+    this.chat.setVisible(false);
     this.inventoryScreen.setVisible(false);
     this.inventoryCursor = { ...EMPTY_CURSOR };
     this.targetHit = null;
@@ -559,6 +580,9 @@ export class Game {
     this.session = session;
     this.timeOfDay = 0;
     this.moonPhase = 0;
+    this.closeChat(false);
+    this.chat.clear();
+    this.chat.setVisible(true);
     this.updateCanvasVisibility();
     this.stopMenuMusic();
     this.savePlayerElapsedMs = 0;
@@ -641,7 +665,7 @@ export class Game {
       this.settings.keyBindings.debug.secondary,
       'F3',
     ]);
-    if (debugPressed) {
+    if (debugPressed && !this.chat.isOpen()) {
       this.debugOverlay.toggle();
     }
 
@@ -650,7 +674,7 @@ export class Game {
       this.settings.keyBindings.inventory.secondary,
       'KeyI',
     ]);
-    if (inventoryPressed) {
+    if (inventoryPressed && !this.chat.isOpen()) {
       if (this.inventoryScreen.isVisible()) {
         void this.closeInventory();
       } else if (this.session && !this.menu.isVisible()) {
@@ -665,12 +689,12 @@ export class Game {
     }
 
     let handledPauseShortcut = false;
-    if (pausePressed && this.menu.isVisible()) {
+    if (pausePressed && !this.chat.isOpen() && this.menu.isVisible()) {
       handledPauseShortcut = true;
       if (this.menu.handleEscapeShortcut()) {
         this.pauseShortcutLatch = true;
       }
-    } else if (pausePressed && this.inventoryScreen.isVisible()) {
+    } else if (pausePressed && !this.chat.isOpen() && this.inventoryScreen.isVisible()) {
       handledPauseShortcut = true;
       this.pauseShortcutLatch = true;
       void this.closeInventory(false);
@@ -687,10 +711,31 @@ export class Game {
       return;
     }
 
+    const canOpenChat =
+      !this.chat.isOpen() && !this.menu.isVisible() && !this.inventoryScreen.isVisible();
+    const openChatPressed =
+      canOpenChat &&
+      this.input.consumeAnyJustPressed([
+        this.settings.keyBindings.chat.primary,
+        this.settings.keyBindings.chat.secondary,
+      ]);
+    const openCommandPressed =
+      canOpenChat &&
+      this.input.consumeAnyJustPressed([
+        this.settings.keyBindings.chatCommand.primary,
+        this.settings.keyBindings.chatCommand.secondary,
+      ]);
+    if (openCommandPressed) {
+      this.openChat('command');
+    } else if (openChatPressed) {
+      this.openChat('chat');
+    }
+
     this.advanceDayNightCycle(dt);
     const { world, player, inventory } = this.session;
+    const chatOpen = this.chat.isOpen();
 
-    if (dropPressed && !this.menu.isVisible()) {
+    if (dropPressed && !chatOpen && !this.menu.isVisible()) {
       if (this.inventoryScreen.isVisible() && this.inventoryCursor.blockId !== null && this.inventoryCursor.count > 0) {
         this.handleInventoryCursorDrop();
       } else {
@@ -700,6 +745,7 @@ export class Game {
 
     if (
       pausePressed &&
+      !chatOpen &&
       !handledPauseShortcut &&
       !this.inventoryScreen.isVisible() &&
       !this.menu.isVisible()
@@ -707,13 +753,14 @@ export class Game {
       if (this.input.isPointerLocked()) {
         this.input.exitPointerLock();
       }
+      this.closeChat(false);
       this.updatePauseMenuSnapshot();
       this.menu.showPause();
       this.hud.setVisible(false);
       this.pauseShortcutLatch = true;
     }
 
-    if (!this.menu.isVisible()) {
+    if (!chatOpen && !this.menu.isVisible()) {
       if (!this.inventoryScreen.isVisible()) {
         const wheelSteps = this.input.consumeWheelSteps();
         if (wheelSteps !== 0) {
@@ -735,7 +782,7 @@ export class Game {
     this.updateFirstPersonHandVisibility(inventory);
 
     const active =
-      this.input.isPointerLocked() && !this.menu.isVisible() && !this.inventoryScreen.isVisible();
+      this.input.isPointerLocked() && !chatOpen && !this.menu.isVisible() && !this.inventoryScreen.isVisible();
     if (active) {
       this.primaryPunchLockMs = Math.max(0, this.primaryPunchLockMs - dt * 1000);
       const primaryDown = this.input.isPrimaryDown();
@@ -811,6 +858,7 @@ export class Game {
       );
     } else {
       if (
+        !chatOpen &&
         !this.menu.isVisible() &&
         !this.inventoryScreen.isVisible() &&
         !this.input.isPointerLocked()
@@ -888,6 +936,96 @@ export class Game {
       this.timeOfDay -= 1;
       this.moonPhase = (this.moonPhase + 1) % MOON_PHASE_COUNT;
     }
+    this.renderer.setCelestialState(this.timeOfDay, this.moonPhase);
+  }
+
+  private openChat(mode: ChatInputMode): void {
+    if (!this.session || this.menu.isVisible() || this.inventoryScreen.isVisible()) {
+      return;
+    }
+
+    this.restorePointerLockAfterChat = this.input.isPointerLocked();
+    if (this.input.isPointerLocked()) {
+      this.input.exitPointerLock();
+    }
+    this.input.clearInputState();
+    this.hud.setPointerUnlockPromptVisible(false);
+    this.chat.openComposer(mode);
+  }
+
+  private closeChat(restorePointerLock = true): void {
+    if (!this.chat.isOpen()) {
+      this.restorePointerLockAfterChat = false;
+      return;
+    }
+
+    const shouldRestore =
+      restorePointerLock &&
+      this.restorePointerLockAfterChat &&
+      !!this.session &&
+      !this.menu.isVisible() &&
+      !this.inventoryScreen.isVisible();
+    this.chat.closeComposer();
+    this.restorePointerLockAfterChat = false;
+    this.input.clearInputState();
+    if (shouldRestore) {
+      void this.resumeSession(false);
+      return;
+    }
+    this.updatePointerUnlockPromptVisibility();
+  }
+
+  private handleChatSubmit(mode: ChatInputMode, value: string): void {
+    if (!value) {
+      this.closeChat();
+      return;
+    }
+
+    if (mode === 'command') {
+      this.chat.addCommandMessage(value);
+      this.executeChatCommand(value);
+    } else {
+      this.chat.addPlayerMessage(value);
+    }
+
+    this.closeChat();
+  }
+
+  private executeChatCommand(rawCommand: string): void {
+    const [commandName = '', ...args] = rawCommand.trim().split(/\s+/);
+    if (!commandName) {
+      this.chat.addSystemMessage(translate('hud.timesetUsage', {}, this.settings.language), 'error');
+      return;
+    }
+
+    if (commandName.toLowerCase() !== CHAT_COMMAND_TIMESET) {
+      this.chat.addSystemMessage(translate('hud.unknownCommand', {}, this.settings.language), 'error');
+      return;
+    }
+
+    const [rawHour] = args;
+    const parsedHour = rawHour ? Number.parseInt(rawHour, 10) : Number.NaN;
+    if (
+      args.length !== 1 ||
+      !Number.isInteger(parsedHour) ||
+      parsedHour < CHAT_CLOCK_HOUR_MIN ||
+      parsedHour > CHAT_CLOCK_HOUR_MAX
+    ) {
+      this.chat.addSystemMessage(translate('hud.timesetUsage', {}, this.settings.language), 'error');
+      return;
+    }
+
+    this.setClockHour(parsedHour);
+    this.chat.addSystemMessage(
+      translate('hud.timesetSuccess', { hour: parsedHour }, this.settings.language),
+    );
+  }
+
+  private setClockHour(hour: number): void {
+    const normalizedHour = hour % CHAT_CLOCK_HOUR_MAX;
+    this.timeOfDay =
+      ((normalizedHour - SUNRISE_CLOCK_HOUR + CHAT_CLOCK_HOUR_MAX) % CHAT_CLOCK_HOUR_MAX) /
+      CHAT_CLOCK_HOUR_MAX;
     this.renderer.setCelestialState(this.timeOfDay, this.moonPhase);
   }
 
@@ -1126,6 +1264,7 @@ export class Game {
       return;
     }
 
+    this.closeChat(false);
     this.inventoryMode = mode;
     this.inventoryScreen.setVisible(true);
     this.hud.setInventoryOverlayActive(true);
@@ -1472,6 +1611,7 @@ export class Game {
   private updatePointerUnlockPromptVisibility(): void {
     const showPrompt =
       !!this.session &&
+      !this.chat.isOpen() &&
       !this.menu.isVisible() &&
       !this.inventoryScreen.isVisible() &&
       !this.input.isPointerLocked();
@@ -1507,6 +1647,13 @@ export class Game {
 
   private handleEscapeKeyDown(event: KeyboardEvent): void {
     if (event.code !== 'Escape' || event.repeat || !this.session) {
+      return;
+    }
+
+    if (this.chat.isOpen()) {
+      event.preventDefault();
+      this.input.consumeJustPressedKey('Escape');
+      this.closeChat();
       return;
     }
 
@@ -1850,6 +1997,7 @@ export class Game {
     this.menu.setSettings(this.settings);
     this.hud.setHandSkin(this.settings.skinDataUrl);
     this.hud.setLanguage(this.settings.language);
+    this.chat.setLanguage(this.settings.language);
     this.inventoryScreen.setLanguage(this.settings.language);
     this.updateWorldLoadingLabel();
     if (!this.settings.developerDebugMode) {

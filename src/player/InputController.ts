@@ -136,7 +136,21 @@ export class InputController {
     this.justPressedKeys.clear();
   }
 
+  clearInputState(): void {
+    this.pressedKeys.clear();
+    this.justPressedKeys.clear();
+    this.lookDeltaX = 0;
+    this.lookDeltaY = 0;
+    this.primaryDown = false;
+    this.primaryClicked = false;
+    this.secondaryClicked = false;
+    this.wheelSteps = 0;
+  }
+
   private handleKeyDown(event: KeyboardEvent): void {
+    if (this.isEditableTarget(event.target)) {
+      return;
+    }
     if (FUNCTION_KEY_PATTERN.test(event.code)) {
       event.preventDefault();
     }
@@ -147,6 +161,9 @@ export class InputController {
   }
 
   private handleKeyUp(event: KeyboardEvent): void {
+    if (this.isEditableTarget(event.target)) {
+      return;
+    }
     this.pressedKeys.delete(event.code);
   }
 
@@ -160,6 +177,9 @@ export class InputController {
   }
 
   private handleMouseDown(event: MouseEvent): void {
+    if (this.isEditableTarget(event.target)) {
+      return;
+    }
     if (event.button === 0) {
       this.primaryDown = true;
       this.primaryClicked = true;
@@ -191,5 +211,28 @@ export class InputController {
   private handlePointerLockChange(): void {
     this.pointerLocked = document.pointerLockElement === this.canvas;
     this.pointerLockListener?.(this.pointerLocked);
+  }
+
+  private isEditableTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    if (target.isContentEditable) {
+      return true;
+    }
+    if (target instanceof HTMLTextAreaElement) {
+      return true;
+    }
+    if (target instanceof HTMLInputElement) {
+      return !(
+        target.type === 'button' ||
+        target.type === 'submit' ||
+        target.type === 'checkbox' ||
+        target.type === 'radio' ||
+        target.type === 'range' ||
+        target.type === 'file'
+      );
+    }
+    return false;
   }
 }

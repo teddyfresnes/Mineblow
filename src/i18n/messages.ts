@@ -108,6 +108,12 @@ const fr = {
   hud: {
     generating: 'Generation...',
     pointerUnlockPrompt: 'Cliquez pour revenir dans le jeu, appuyez sur P pour ouvrir le menu pause',
+    chatPlaceholder: 'Entrer un message...',
+    commandPlaceholder: 'Entrer une commande...',
+    commandPrefix: 'COMMAND',
+    unknownCommand: 'Commande inconnue. Usage: COMMAND timeset <1-24> (voir commands.md)',
+    timesetUsage: 'Usage: COMMAND timeset <1-24> (voir commands.md)',
+    timesetSuccess: 'Heure reglee sur {hour}',
   },
   controls: {
     unbound: 'Non assigne',
@@ -120,6 +126,8 @@ const fr = {
       crouch: "S'accroupir",
       sprint: 'Courir',
       inventory: 'Inventaire',
+      chat: 'Ouvrir chat',
+      chatCommand: 'Ouvrir commande',
       drop: 'Jeter item',
       debug: 'Overlay debug',
       pause: 'Menu pause',
@@ -310,6 +318,12 @@ const en: MessageCatalog = {
   hud: {
     generating: 'Generating...',
     pointerUnlockPrompt: 'Click to return to the game, press P to open the pause menu',
+    chatPlaceholder: 'Enter a message...',
+    commandPlaceholder: 'Enter a command...',
+    commandPrefix: 'COMMAND',
+    unknownCommand: 'Unknown command. Usage: COMMAND timeset <1-24> (see commands.md)',
+    timesetUsage: 'Usage: COMMAND timeset <1-24> (see commands.md)',
+    timesetSuccess: 'Time set to {hour}',
   },
   controls: {
     unbound: 'Unbound',
@@ -322,6 +336,8 @@ const en: MessageCatalog = {
       crouch: 'Crouch',
       sprint: 'Sprint',
       inventory: 'Inventory',
+      chat: 'Open Chat',
+      chatCommand: 'Open Command',
       drop: 'Drop Item',
       debug: 'Debug Overlay',
       pause: 'Pause Menu',

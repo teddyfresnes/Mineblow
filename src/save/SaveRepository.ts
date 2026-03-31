@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { SAVE_CONFIG } from '../game/Config';
 import {
+  CONTROL_ACTIONS,
   DEFAULT_INTERFACE_SIZE,
   createDefaultSettings,
   normalizeInterfaceSize,
@@ -62,6 +63,54 @@ const DEFAULT_APP_META: StoredAppMeta = {
   schemaVersion: 1,
   activeWorldId: null,
   lastWorldId: null,
+};
+
+const hydrateSettings = (value: unknown): GameSettings | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const defaults = createDefaultSettings();
+  const candidate = value as Partial<StoredSettings>;
+  const mergedBindings = createDefaultSettings().keyBindings;
+
+  if (candidate.keyBindings && typeof candidate.keyBindings === 'object') {
+    CONTROL_ACTIONS.forEach((action) => {
+      const binding = candidate.keyBindings?.[action];
+      if (!binding || typeof binding !== 'object') {
+        return;
+      }
+
+      mergedBindings[action] = {
+        primary:
+          typeof binding.primary === 'string' || binding.primary === null
+            ? binding.primary
+            : defaults.keyBindings[action].primary,
+        secondary:
+          typeof binding.secondary === 'string' || binding.secondary === null
+            ? binding.secondary
+            : defaults.keyBindings[action].secondary,
+      };
+    });
+  }
+
+  return {
+    keyBindings: mergedBindings,
+    skinDataUrl:
+      typeof candidate.skinDataUrl === 'string' || candidate.skinDataUrl === null
+        ? candidate.skinDataUrl
+        : defaults.skinDataUrl,
+    startFullscreen:
+      typeof candidate.startFullscreen === 'boolean'
+        ? candidate.startFullscreen
+        : defaults.startFullscreen,
+    interfaceSize: normalizeInterfaceSize(candidate.interfaceSize ?? DEFAULT_INTERFACE_SIZE),
+    language: candidate.language ?? DEFAULT_UI_LANGUAGE,
+    developerDebugMode:
+      typeof candidate.developerDebugMode === 'boolean'
+        ? candidate.developerDebugMode
+        : defaults.developerDebugMode,
+  };
 };
 
 const sortWorlds = (worlds: WorldSummary[]): WorldSummary[] =>
@@ -412,6 +461,12 @@ export class SaveRepository {
         language: settings.language ?? DEFAULT_UI_LANGUAGE,
         developerDebugMode: settings.developerDebugMode ?? false,
       };
+    }
+
+    const hydrated = hydrateSettings(settings);
+    if (hydrated) {
+      await this.saveSettings(hydrated);
+      return hydrated;
     }
 
     const defaults = createDefaultSettings();
