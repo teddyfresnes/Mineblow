@@ -100,8 +100,9 @@ const ITEM_WATER_OUTFLOW_ACCELERATION = 2.1;
 const ITEM_WATER_OUTFLOW_EXIT_IMPULSE_SCALE = 0.84;
 const DAY_NIGHT_CYCLE_SECONDS = 20 * 60;
 const MOON_PHASE_COUNT = 8;
-const CHAT_COMMAND_TIMESET = 'timeset';
-const CHAT_CLOCK_HOUR_MIN = 1;
+const CHAT_COMMAND_TIME = 'time';
+const CHAT_SUBCOMMAND_CLOCK = 'clock';
+const CHAT_CLOCK_HOUR_MIN = 0;
 const CHAT_CLOCK_HOUR_MAX = 24;
 const SUNRISE_CLOCK_HOUR = 8;
 
@@ -950,7 +951,7 @@ export class Game {
     }
     this.input.clearInputState();
     this.hud.setPointerUnlockPromptVisible(false);
-    this.chat.openComposer(mode);
+    this.chat.openComposer(mode, mode === 'command' ? '/' : '');
   }
 
   private closeChat(restorePointerLock = true): void {
@@ -976,14 +977,15 @@ export class Game {
   }
 
   private handleChatSubmit(mode: ChatInputMode, value: string): void {
+    void mode;
     if (!value) {
       this.closeChat();
       return;
     }
 
-    if (mode === 'command') {
+    if (value.startsWith('/')) {
       this.chat.addCommandMessage(value);
-      this.executeChatCommand(value);
+      this.executeChatCommand(value.slice(1).trim());
     } else {
       this.chat.addPlayerMessage(value);
     }
@@ -994,30 +996,31 @@ export class Game {
   private executeChatCommand(rawCommand: string): void {
     const [commandName = '', ...args] = rawCommand.trim().split(/\s+/);
     if (!commandName) {
-      this.chat.addSystemMessage(translate('hud.timesetUsage', {}, this.settings.language), 'error');
-      return;
-    }
-
-    if (commandName.toLowerCase() !== CHAT_COMMAND_TIMESET) {
       this.chat.addSystemMessage(translate('hud.unknownCommand', {}, this.settings.language), 'error');
       return;
     }
 
-    const [rawHour] = args;
+    if (commandName.toLowerCase() !== CHAT_COMMAND_TIME) {
+      this.chat.addSystemMessage(translate('hud.unknownCommand', {}, this.settings.language), 'error');
+      return;
+    }
+
+    const [subcommand = '', rawHour] = args;
     const parsedHour = rawHour ? Number.parseInt(rawHour, 10) : Number.NaN;
     if (
-      args.length !== 1 ||
+      subcommand.toLowerCase() !== CHAT_SUBCOMMAND_CLOCK ||
+      args.length !== 2 ||
       !Number.isInteger(parsedHour) ||
       parsedHour < CHAT_CLOCK_HOUR_MIN ||
       parsedHour > CHAT_CLOCK_HOUR_MAX
     ) {
-      this.chat.addSystemMessage(translate('hud.timesetUsage', {}, this.settings.language), 'error');
+      this.chat.addSystemMessage(translate('hud.timeClockUsage', {}, this.settings.language), 'error');
       return;
     }
 
     this.setClockHour(parsedHour);
     this.chat.addSystemMessage(
-      translate('hud.timesetSuccess', { hour: parsedHour }, this.settings.language),
+      translate('hud.timeClockSuccess', { hour: parsedHour }, this.settings.language),
     );
   }
 

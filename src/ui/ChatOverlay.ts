@@ -20,7 +20,6 @@ export class ChatOverlay {
   private readonly root = document.createElement('div');
   private readonly history = document.createElement('div');
   private readonly composer = document.createElement('div');
-  private readonly modeBadge = document.createElement('span');
   private readonly input = document.createElement('input');
   private readonly entries: ChatEntryRecord[] = [];
   private language: UiLanguage = DEFAULT_UI_LANGUAGE;
@@ -31,7 +30,6 @@ export class ChatOverlay {
     this.root.className = 'chat-overlay';
     this.history.className = 'chat-history';
     this.composer.className = 'chat-composer';
-    this.modeBadge.className = 'chat-mode-badge';
     this.input.className = 'chat-input';
     this.input.type = 'text';
     this.input.maxLength = 220;
@@ -39,7 +37,7 @@ export class ChatOverlay {
     this.input.autocomplete = 'off';
     this.input.autocapitalize = 'off';
 
-    this.composer.append(this.modeBadge, this.input);
+    this.composer.append(this.input);
     this.root.append(this.history, this.composer);
     parent.append(this.root);
 
@@ -123,7 +121,7 @@ export class ChatOverlay {
   }
 
   addCommandMessage(text: string): void {
-    this.addEntry('command', translate('hud.commandPrefix', {}, this.language), text);
+    this.addEntry('command', null, text);
   }
 
   addSystemMessage(text: string, tone: 'system' | 'error' = 'system'): void {
@@ -176,8 +174,6 @@ export class ChatOverlay {
   private syncComposerState(): void {
     const commandMode = this.mode === 'command';
     this.composer.style.display = this.composerOpen ? '' : 'none';
-    this.modeBadge.style.display = commandMode ? '' : 'none';
-    this.modeBadge.textContent = translate('hud.commandPrefix', {}, this.language);
     this.input.placeholder = translate(
       commandMode ? 'hud.commandPlaceholder' : 'hud.chatPlaceholder',
       {},

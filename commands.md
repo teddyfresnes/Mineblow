@@ -3,31 +3,34 @@
 ## Chat
 
 - `C` ouvre le chat texte.
-- `H` ouvre le chat en mode commande avec le prefixe `COMMAND`.
+- `H` ouvre le chat avec un `/` deja present pour taper une commande plus vite.
+- Si un message commence par `/`, il est traite comme une commande.
 - `Entree` valide.
 - `Echap` ferme le chat.
 
 ## Commandes disponibles
 
-### `timeset <1-24>`
+### `/time clock <0-24>`
 
 Regle l'heure du cycle jour/nuit.
 
+- `0` = minuit
 - `8` = levee du soleil
 - `14` = midi
 - `20` = coucher du soleil
-- `2` = milieu de la nuit
+- `24` = minuit
 
 Exemples:
 
-- `timeset 8`
-- `timeset 14`
-- `timeset 20`
+- `/time clock 0`
+- `/time clock 8`
+- `/time clock 14`
+- `/time clock 20`
 
 ## Usage en jeu
 
-Si une commande echoue, le chat affiche son usage directement.
+Si la commande `/time` echoue, le chat affiche son usage directement.
 
 Format actuel:
 
-`COMMAND timeset <1-24>`
+`/time clock <0-24>`

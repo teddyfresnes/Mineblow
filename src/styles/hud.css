@@ -561,12 +561,12 @@ body.pointer-cursor-hidden * {
 
 .chat-overlay {
   position: absolute;
-  right: 16px;
+  left: 16px;
   bottom: calc(var(--ui-slot-size) + 38px);
   z-index: 45;
   width: min(440px, calc(100vw - 32px));
   display: grid;
-  justify-items: end;
+  justify-items: start;
   gap: 8px;
   pointer-events: none;
 }
@@ -580,6 +580,7 @@ body.pointer-cursor-hidden * {
   max-height: min(260px, 34vh);
   display: grid;
   align-content: end;
+  justify-items: start;
   gap: 6px;
   overflow: hidden;
   padding-right: 4px;
@@ -601,7 +602,7 @@ body.pointer-cursor-hidden * {
   display: inline-flex;
   gap: 8px;
   align-items: baseline;
-  justify-self: end;
+  justify-self: start;
   padding: 7px 10px;
   border-left: 3px solid rgba(255, 255, 255, 0.52);
   background: rgba(0, 0, 0, 0.7);
@@ -645,15 +646,6 @@ body.pointer-cursor-hidden * {
   transform: translateY(0);
 }
 
-.chat-entry-prefix {
-  color: #f3d27a;
-  font-size: 0.74rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  flex: 0 0 auto;
-}
-
 .chat-entry-text {
   min-width: 0;
 }
@@ -672,15 +664,6 @@ body.pointer-cursor-hidden * {
     0 10px 30px rgba(0, 0, 0, 0.28);
   pointer-events: auto;
   box-sizing: border-box;
-}
-
-.chat-mode-badge {
-  flex: 0 0 auto;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #f3d27a;
 }
 
 .chat-input {
