@@ -37,11 +37,12 @@ export const updateSunForCamera = (
   lights: SceneLights,
   cameraX: number,
   cameraZ: number,
+  sunDirection: Vector3 = SUN_DIRECTION,
 ): void => {
   lights.sun.position.set(
-    cameraX + SUN_DIRECTION.x * SUN_LIGHT_DISTANCE,
-    SUN_DIRECTION.y * SUN_LIGHT_DISTANCE,
-    cameraZ + SUN_DIRECTION.z * SUN_LIGHT_DISTANCE,
+    cameraX + sunDirection.x * SUN_LIGHT_DISTANCE,
+    sunDirection.y * SUN_LIGHT_DISTANCE,
+    cameraZ + sunDirection.z * SUN_LIGHT_DISTANCE,
   );
   lights.sunTarget.position.set(cameraX, 12, cameraZ);
   lights.sunTarget.updateMatrixWorld();

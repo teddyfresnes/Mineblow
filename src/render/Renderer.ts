@@ -24,7 +24,7 @@ import { WORLD_CONFIG } from '../game/Config';
 import type { BlockId } from '../types/blocks';
 import type { VoxelHit } from '../types/world';
 import { getBlockDefinition } from '../world/BlockRegistry';
-import { addSceneLights, type SceneLights, updateSunForCamera } from './SceneLights';
+import { SUN_DIRECTION, addSceneLights, type SceneLights, updateSunForCamera } from './SceneLights';
 import { createFirstPersonHand, disposeModel, loadSkinTexture } from './SkinModel';
 import { SkyDome } from './SkyDome';
 import { TextureAtlas } from './TextureAtlas';
@@ -64,6 +64,22 @@ const AIR_FOG_COLOR = '#95b9dd';
 const AIR_FOG_NEAR = 60;
 const AIR_FOG_FAR = 190;
 const AIR_EXPOSURE = 1.03;
+const AIR_FOG_NEAR_NIGHT = 42;
+const AIR_FOG_FAR_NIGHT = 132;
+const AIR_EXPOSURE_NIGHT = 0.46;
+const TWILIGHT_FOG_COLOR = '#d38d6a';
+const NIGHT_FOG_COLOR = '#101a29';
+const TWILIGHT_BACKGROUND_COLOR = '#d79d76';
+const NIGHT_BACKGROUND_COLOR = '#060b14';
+const DAY_SKY_TOP_COLOR = '#7eb8f7';
+const DAY_SKY_HORIZON_COLOR = '#c9e6ff';
+const DAY_SKY_BOTTOM_COLOR = '#f7ddb1';
+const TWILIGHT_SKY_TOP_COLOR = '#4f6ea8';
+const TWILIGHT_SKY_HORIZON_COLOR = '#f09a68';
+const TWILIGHT_SKY_BOTTOM_COLOR = '#ffd29b';
+const NIGHT_SKY_TOP_COLOR = '#08111f';
+const NIGHT_SKY_HORIZON_COLOR = '#15263d';
+const NIGHT_SKY_BOTTOM_COLOR = '#04070d';
 const UNDERWATER_FOG_COLOR = '#284f7a';
 const UNDERWATER_DEEP_FOG_COLOR = '#0f2236';
 const UNDERWATER_FOG_NEAR = 6;
@@ -75,9 +91,18 @@ const UNDERWATER_DEEP_EXPOSURE = 0.48;
 const UNDERWATER_DEPTH_FOR_MAX_ATTENUATION = 28;
 const UNDERWATER_LIGHT_SCALE_SHALLOW = 0.68;
 const UNDERWATER_LIGHT_SCALE_DEEP = 0.34;
+const MOON_PHASE_COUNT = 8;
+const ORBIT_HORIZONTAL_DIRECTION = new Vector3(SUN_DIRECTION.x, 0, SUN_DIRECTION.z).normalize();
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 const lerp = (from: number, to: number, ratio: number): number => from + (to - from) * ratio;
+const smoothstep = (edge0: number, edge1: number, value: number): number => {
+  if (edge0 === edge1) {
+    return value < edge0 ? 0 : 1;
+  }
+  const ratio = clamp01((value - edge0) / (edge1 - edge0));
+  return ratio * ratio * (3 - 2 * ratio);
+};
 
 export type FirstPersonAnimationPreset = 'hand' | 'item';
 
@@ -156,16 +181,45 @@ export class Renderer {
   private readonly lights: SceneLights;
   private readonly sceneFog: Fog;
   private readonly airFogColor = new Color(AIR_FOG_COLOR);
+  private readonly currentAirFogColor = new Color(AIR_FOG_COLOR);
+  private readonly twilightFogColor = new Color(TWILIGHT_FOG_COLOR);
+  private readonly nightFogColor = new Color(NIGHT_FOG_COLOR);
   private readonly underwaterFogColor = new Color(UNDERWATER_FOG_COLOR);
   private readonly underwaterDeepFogColor = new Color(UNDERWATER_DEEP_FOG_COLOR);
   private readonly airBackgroundColor = new Color(WORLD_CONFIG.skyColor);
+  private readonly twilightBackgroundColor = new Color(TWILIGHT_BACKGROUND_COLOR);
+  private readonly nightBackgroundColor = new Color(NIGHT_BACKGROUND_COLOR);
+  private readonly daySkyTopColor = new Color(DAY_SKY_TOP_COLOR);
+  private readonly daySkyHorizonColor = new Color(DAY_SKY_HORIZON_COLOR);
+  private readonly daySkyBottomColor = new Color(DAY_SKY_BOTTOM_COLOR);
+  private readonly twilightSkyTopColor = new Color(TWILIGHT_SKY_TOP_COLOR);
+  private readonly twilightSkyHorizonColor = new Color(TWILIGHT_SKY_HORIZON_COLOR);
+  private readonly twilightSkyBottomColor = new Color(TWILIGHT_SKY_BOTTOM_COLOR);
+  private readonly nightSkyTopColor = new Color(NIGHT_SKY_TOP_COLOR);
+  private readonly nightSkyHorizonColor = new Color(NIGHT_SKY_HORIZON_COLOR);
+  private readonly nightSkyBottomColor = new Color(NIGHT_SKY_BOTTOM_COLOR);
   private readonly fogMixColor = new Color();
+  private readonly skyTopColor = new Color(DAY_SKY_TOP_COLOR);
+  private readonly skyHorizonColor = new Color(DAY_SKY_HORIZON_COLOR);
+  private readonly skyBottomColor = new Color(DAY_SKY_BOTTOM_COLOR);
+  private readonly currentSunDirection = SUN_DIRECTION.clone();
+  private readonly currentMoonDirection = SUN_DIRECTION.clone().multiplyScalar(-1);
   private readonly miningOverlay: Mesh;
   private readonly handRig = new Group();
   private readonly heldItemAnchor = new Group();
   private readonly baseAmbientIntensity: number;
   private readonly baseSkyBounceIntensity: number;
   private readonly baseSunIntensity: number;
+  private airExposure = AIR_EXPOSURE;
+  private airFogNear = AIR_FOG_NEAR;
+  private airFogFar = AIR_FOG_FAR;
+  private airAmbientIntensity = 0;
+  private airSkyBounceIntensity = 0;
+  private airSunIntensity = 0;
+  private timeOfDay = 0;
+  private moonPhase = 0;
+  private underwaterEnabled = false;
+  private underwaterDepth = 0;
   private waterSurfaceLineStrength = 0;
   private waterSurfaceLineStrengthUniform: { value: number } | null = null;
   private handModel: Group | null = null;
@@ -284,7 +338,8 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.baseAmbientIntensity = this.lights.ambient.intensity;
     this.baseSkyBounceIntensity = this.lights.skyBounce.intensity;
     this.baseSunIntensity = this.lights.sun.intensity;
-    updateSunForCamera(this.lights, 0, 0);
+    this.setCelestialState(0, 0);
+    updateSunForCamera(this.lights, 0, 0, this.currentSunDirection);
     void this.setPlayerSkin(null);
 
     this.miningOverlay = new Mesh(
@@ -320,7 +375,7 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.camera.rotation.y = yaw;
     this.camera.rotation.x = pitch;
     this.sky.update(position.x, position.z);
-    updateSunForCamera(this.lights, position.x, position.z);
+    updateSunForCamera(this.lights, position.x, position.z, this.currentSunDirection);
   }
 
   upsertChunkMesh(
@@ -521,32 +576,73 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     }
   }
 
-  setUnderwaterView(enabled: boolean, depth = 0): void {
-    const targetWaterSide = enabled ? DoubleSide : FrontSide;
-    if (this.waterMaterial.side !== targetWaterSide) {
-      this.waterMaterial.side = targetWaterSide;
-      this.waterMaterial.needsUpdate = true;
-    }
+  setCelestialState(timeOfDay: number, moonPhase: number): void {
+    this.timeOfDay = ((timeOfDay % 1) + 1) % 1;
+    this.moonPhase = ((Math.floor(moonPhase) % MOON_PHASE_COUNT) + MOON_PHASE_COUNT) % MOON_PHASE_COUNT;
+    this.updateAirAtmosphere();
+    this.applyViewAtmosphere();
+  }
 
-    this.sky.group.visible = !enabled;
-    if (!enabled) {
-      this.waterSurfaceLineStrength = 0;
-      if (this.waterSurfaceLineStrengthUniform) {
-        this.waterSurfaceLineStrengthUniform.value = 0;
-      }
-      this.sceneFog.color.copy(this.airFogColor);
-      this.sceneFog.near = AIR_FOG_NEAR;
-      this.sceneFog.far = AIR_FOG_FAR;
-      this.renderer.toneMappingExposure = AIR_EXPOSURE;
+  private updateAirAtmosphere(): void {
+    const orbitAngle = this.timeOfDay * Math.PI * 2;
+    this.currentSunDirection.copy(ORBIT_HORIZONTAL_DIRECTION).multiplyScalar(Math.cos(orbitAngle));
+    this.currentSunDirection.y = Math.sin(orbitAngle);
+    this.currentSunDirection.normalize();
+    this.currentMoonDirection.copy(this.currentSunDirection).multiplyScalar(-1);
+
+    const sunHeight = this.currentSunDirection.y;
+    const moonHeight = this.currentMoonDirection.y;
+    const daylight = smoothstep(-0.12, 0.18, sunHeight);
+    const twilight = 1 - smoothstep(0.04, 0.34, Math.abs(sunHeight));
+    const directSun = smoothstep(-0.03, 0.16, sunHeight);
+    const moonGlow = smoothstep(-0.14, 0.14, moonHeight) * (0.32 + (1 - daylight) * 0.58);
+
+    this.skyTopColor.copy(this.nightSkyTopColor).lerp(this.daySkyTopColor, daylight);
+    this.skyTopColor.lerp(this.twilightSkyTopColor, twilight * 0.34);
+    this.skyHorizonColor.copy(this.nightSkyHorizonColor).lerp(this.daySkyHorizonColor, daylight);
+    this.skyHorizonColor.lerp(this.twilightSkyHorizonColor, twilight * 0.66);
+    this.skyBottomColor.copy(this.nightSkyBottomColor).lerp(this.daySkyBottomColor, daylight);
+    this.skyBottomColor.lerp(this.twilightSkyBottomColor, twilight * 0.56);
+
+    this.currentAirFogColor.copy(this.nightFogColor).lerp(this.airFogColor, daylight);
+    this.currentAirFogColor.lerp(this.twilightFogColor, twilight * 0.42);
+    this.airBackgroundColor.copy(this.nightBackgroundColor).lerp(this.daySkyHorizonColor, daylight);
+    this.airBackgroundColor.lerp(this.twilightBackgroundColor, twilight * 0.32);
+
+    this.airFogNear = lerp(AIR_FOG_NEAR_NIGHT, AIR_FOG_NEAR, daylight);
+    this.airFogFar = lerp(AIR_FOG_FAR_NIGHT, AIR_FOG_FAR, daylight);
+    this.airExposure = lerp(AIR_EXPOSURE_NIGHT, AIR_EXPOSURE, daylight);
+    this.airAmbientIntensity = this.baseAmbientIntensity * lerp(0.18, 1, daylight) + twilight * 0.04;
+    this.airSkyBounceIntensity = this.baseSkyBounceIntensity * lerp(0.14, 1, daylight) + twilight * 0.05;
+    this.airSunIntensity = this.baseSunIntensity * directSun;
+
+    this.sky.setCelestialState({
+      topColor: this.skyTopColor,
+      horizonColor: this.skyHorizonColor,
+      bottomColor: this.skyBottomColor,
+      sunDirection: this.currentSunDirection,
+      moonDirection: this.currentMoonDirection,
+      sunIntensity: lerp(0.18, 0.96, directSun),
+      moonIntensity: moonGlow,
+      moonPhase: this.moonPhase,
+    });
+  }
+
+  private applyViewAtmosphere(): void {
+    if (!this.underwaterEnabled) {
+      this.sceneFog.color.copy(this.currentAirFogColor);
+      this.sceneFog.near = this.airFogNear;
+      this.sceneFog.far = this.airFogFar;
+      this.renderer.toneMappingExposure = this.airExposure;
       this.renderer.setClearColor(this.airBackgroundColor);
       this.scene.background = this.airBackgroundColor;
-      this.lights.ambient.intensity = this.baseAmbientIntensity;
-      this.lights.skyBounce.intensity = this.baseSkyBounceIntensity;
-      this.lights.sun.intensity = this.baseSunIntensity;
+      this.lights.ambient.intensity = this.airAmbientIntensity;
+      this.lights.skyBounce.intensity = this.airSkyBounceIntensity;
+      this.lights.sun.intensity = this.airSunIntensity;
       return;
     }
 
-    const depthRatio = clamp01(depth / UNDERWATER_DEPTH_FOR_MAX_ATTENUATION);
+    const depthRatio = clamp01(this.underwaterDepth / UNDERWATER_DEPTH_FOR_MAX_ATTENUATION);
     this.waterSurfaceLineStrength = lerp(
       WATER_SURFACE_LINE_STRENGTH_SHALLOW,
       WATER_SURFACE_LINE_STRENGTH_DEEP,
@@ -570,9 +666,30 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.scene.background = this.sceneFog.color;
 
     const lightScale = lerp(UNDERWATER_LIGHT_SCALE_SHALLOW, UNDERWATER_LIGHT_SCALE_DEEP, depthRatio);
-    this.lights.ambient.intensity = this.baseAmbientIntensity * lightScale;
-    this.lights.skyBounce.intensity = this.baseSkyBounceIntensity * lightScale * 0.82;
-    this.lights.sun.intensity = this.baseSunIntensity * lightScale * 0.7;
+    this.lights.ambient.intensity = this.airAmbientIntensity * lightScale;
+    this.lights.skyBounce.intensity = this.airSkyBounceIntensity * lightScale * 0.82;
+    this.lights.sun.intensity = this.airSunIntensity * lightScale * 0.7;
+  }
+
+  setUnderwaterView(enabled: boolean, depth = 0): void {
+    const targetWaterSide = enabled ? DoubleSide : FrontSide;
+    if (this.waterMaterial.side !== targetWaterSide) {
+      this.waterMaterial.side = targetWaterSide;
+      this.waterMaterial.needsUpdate = true;
+    }
+
+    this.underwaterEnabled = enabled;
+    this.underwaterDepth = depth;
+    this.sky.group.visible = !enabled;
+    if (!enabled) {
+      this.waterSurfaceLineStrength = 0;
+      if (this.waterSurfaceLineStrengthUniform) {
+        this.waterSurfaceLineStrengthUniform.value = 0;
+      }
+      this.applyViewAtmosphere();
+      return;
+    }
+    this.applyViewAtmosphere();
   }
 
   spawnDroppedItem(itemId: string, blockId: BlockId, x: number, y: number, z: number): void {

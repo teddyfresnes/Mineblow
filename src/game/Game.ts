@@ -97,6 +97,8 @@ const UNDERWATER_SURFACE_SCAN_MAX_BLOCKS = 160;
 const ITEM_WATER_FLOW_ACCELERATION = 4.25;
 const ITEM_WATER_OUTFLOW_ACCELERATION = 2.1;
 const ITEM_WATER_OUTFLOW_EXIT_IMPULSE_SCALE = 0.84;
+const DAY_NIGHT_CYCLE_SECONDS = 20 * 60;
+const MOON_PHASE_COUNT = 8;
 
 export class Game {
   private readonly shell = document.createElement('div');
@@ -156,6 +158,8 @@ export class Game {
   private readonly droppedItems = new Map<string, DroppedItem>();
   private worldTransitionPending = false;
   private hotbarDirty = false;
+  private timeOfDay = 0;
+  private moonPhase = 0;
 
   constructor(private readonly root: HTMLElement) {
     this.shell.className = 'mineblow-shell';
@@ -553,6 +557,8 @@ export class Game {
       this.disposeSessionWorld(previousSession);
     }
     this.session = session;
+    this.timeOfDay = 0;
+    this.moonPhase = 0;
     this.updateCanvasVisibility();
     this.stopMenuMusic();
     this.savePlayerElapsedMs = 0;
@@ -591,6 +597,7 @@ export class Game {
     this.updateFirstPersonHandVisibility(session.inventory);
     this.markHotbarDirty();
     this.syncHotbarHud();
+    this.renderer.setCelestialState(this.timeOfDay, this.moonPhase);
     this.hud.setGenerating(
       this.settings.developerDebugMode &&
         (session.world.hasPendingGeneration() || session.world.hasPendingMeshes()),
@@ -680,6 +687,7 @@ export class Game {
       return;
     }
 
+    this.advanceDayNightCycle(dt);
     const { world, player, inventory } = this.session;
 
     if (dropPressed && !this.menu.isVisible()) {
@@ -872,6 +880,15 @@ export class Game {
     }
     this.updatePointerUnlockPromptVisibility();
     this.input.endFrame();
+  }
+
+  private advanceDayNightCycle(dt: number): void {
+    this.timeOfDay += dt / DAY_NIGHT_CYCLE_SECONDS;
+    while (this.timeOfDay >= 1) {
+      this.timeOfDay -= 1;
+      this.moonPhase = (this.moonPhase + 1) % MOON_PHASE_COUNT;
+    }
+    this.renderer.setCelestialState(this.timeOfDay, this.moonPhase);
   }
 
   private render(): void {
