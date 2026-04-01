@@ -13,8 +13,9 @@ interface ChatOverlayHandlers {
   onCancel?: () => void;
 }
 
-const CHAT_ENTRY_VISIBLE_MS = 3000;
-const CHAT_ENTRY_LIMIT = 120;
+const CHAT_ENTRY_VISIBLE_MS = 6000;
+const CHAT_ENTRY_LIMIT = 128;
+const CHAT_AUTO_SCROLL_THRESHOLD_PX = 24;
 
 export class ChatOverlay {
   private readonly root = document.createElement('div');
@@ -47,6 +48,9 @@ export class ChatOverlay {
     this.root.addEventListener('click', (event) => {
       event.stopPropagation();
     });
+    this.history.addEventListener('wheel', (event) => {
+      event.stopPropagation();
+    });
 
     this.input.addEventListener('keydown', (event) => {
       if (event.isComposing) {
@@ -56,7 +60,11 @@ export class ChatOverlay {
       if (event.code === 'Enter' || event.code === 'NumpadEnter') {
         event.preventDefault();
         event.stopPropagation();
-        this.handlers.onSubmit?.(this.mode, this.input.value.trim());
+        const submittedValue = this.input.value.trim();
+        if (!submittedValue) {
+          return;
+        }
+        this.handlers.onSubmit?.(this.mode, submittedValue);
         return;
       }
 
@@ -129,6 +137,7 @@ export class ChatOverlay {
   }
 
   private addEntry(tone: ChatEntryTone, prefix: string | null, text: string): void {
+    const shouldAutoScroll = !this.composerOpen || this.isNearBottom();
     const entry = document.createElement('div');
     entry.className = `chat-entry ${tone}`;
 
@@ -155,7 +164,9 @@ export class ChatOverlay {
     };
     this.entries.push(record);
     this.trimEntries();
-    this.scrollToBottom();
+    if (shouldAutoScroll) {
+      this.scrollToBottom();
+    }
   }
 
   private trimEntries(): void {
@@ -183,5 +194,11 @@ export class ChatOverlay {
 
   private scrollToBottom(): void {
     this.history.scrollTop = this.history.scrollHeight;
+  }
+
+  private isNearBottom(): boolean {
+    const remainingScroll =
+      this.history.scrollHeight - this.history.clientHeight - this.history.scrollTop;
+    return remainingScroll <= CHAT_AUTO_SCROLL_THRESHOLD_PX;
   }
 }

@@ -102,8 +102,12 @@ const DAY_NIGHT_CYCLE_SECONDS = 20 * 60;
 const MOON_PHASE_COUNT = 8;
 const CHAT_COMMAND_TIME = 'time';
 const CHAT_SUBCOMMAND_CLOCK = 'clock';
+const CHAT_SUBCOMMAND_NEXTDAY = 'nextday';
+const CHAT_SUBCOMMAND_MOON = 'moon';
 const CHAT_CLOCK_HOUR_MIN = 0;
 const CHAT_CLOCK_HOUR_MAX = 24;
+const CHAT_MOON_PHASE_MIN = 1;
+const CHAT_MOON_PHASE_MAX = MOON_PHASE_COUNT;
 const SUNRISE_CLOCK_HOUR = 8;
 
 export class Game {
@@ -935,9 +939,9 @@ export class Game {
     this.timeOfDay += dt / DAY_NIGHT_CYCLE_SECONDS;
     while (this.timeOfDay >= 1) {
       this.timeOfDay -= 1;
-      this.moonPhase = (this.moonPhase + 1) % MOON_PHASE_COUNT;
+      this.advanceMoonPhase();
     }
-    this.renderer.setCelestialState(this.timeOfDay, this.moonPhase);
+    this.applyCelestialState();
   }
 
   private openChat(mode: ChatInputMode): void {
@@ -978,11 +982,6 @@ export class Game {
 
   private handleChatSubmit(mode: ChatInputMode, value: string): void {
     void mode;
-    if (!value) {
-      this.closeChat();
-      return;
-    }
-
     if (value.startsWith('/')) {
       this.chat.addCommandMessage(value);
       this.executeChatCommand(value.slice(1).trim());
@@ -1005,23 +1004,74 @@ export class Game {
       return;
     }
 
-    const [subcommand = '', rawHour] = args;
-    const parsedHour = rawHour ? Number.parseInt(rawHour, 10) : Number.NaN;
-    if (
-      subcommand.toLowerCase() !== CHAT_SUBCOMMAND_CLOCK ||
-      args.length !== 2 ||
-      !Number.isInteger(parsedHour) ||
-      parsedHour < CHAT_CLOCK_HOUR_MIN ||
-      parsedHour > CHAT_CLOCK_HOUR_MAX
-    ) {
-      this.chat.addSystemMessage(translate('hud.timeClockUsage', {}, this.settings.language), 'error');
-      return;
-    }
+    this.executeTimeCommand(args);
+  }
 
-    this.setClockHour(parsedHour);
-    this.chat.addSystemMessage(
-      translate('hud.timeClockSuccess', { hour: parsedHour }, this.settings.language),
-    );
+  private executeTimeCommand(args: string[]): void {
+    const [subcommand = '', ...subcommandArgs] = args;
+    switch (subcommand.toLowerCase()) {
+      case CHAT_SUBCOMMAND_CLOCK: {
+        const [rawHour] = subcommandArgs;
+        const parsedHour = rawHour ? Number.parseInt(rawHour, 10) : Number.NaN;
+        if (
+          subcommandArgs.length !== 1 ||
+          !Number.isInteger(parsedHour) ||
+          parsedHour < CHAT_CLOCK_HOUR_MIN ||
+          parsedHour > CHAT_CLOCK_HOUR_MAX
+        ) {
+          this.chat.addSystemMessage(
+            translate('hud.timeClockUsage', {}, this.settings.language),
+            'error',
+          );
+          return;
+        }
+
+        this.setClockHour(parsedHour);
+        this.chat.addSystemMessage(
+          translate('hud.timeClockSuccess', { hour: parsedHour }, this.settings.language),
+        );
+        return;
+      }
+      case CHAT_SUBCOMMAND_NEXTDAY:
+        if (subcommandArgs.length !== 0) {
+          this.chat.addSystemMessage(
+            translate('hud.timeNextDayUsage', {}, this.settings.language),
+            'error',
+          );
+          return;
+        }
+
+        this.advanceMoonPhase();
+        this.applyCelestialState();
+        this.chat.addSystemMessage(
+          translate('hud.timeNextDaySuccess', {}, this.settings.language),
+        );
+        return;
+      case CHAT_SUBCOMMAND_MOON: {
+        const [rawPhase] = subcommandArgs;
+        const parsedPhase = rawPhase ? Number.parseInt(rawPhase, 10) : Number.NaN;
+        if (
+          subcommandArgs.length !== 1 ||
+          !Number.isInteger(parsedPhase) ||
+          parsedPhase < CHAT_MOON_PHASE_MIN ||
+          parsedPhase > CHAT_MOON_PHASE_MAX
+        ) {
+          this.chat.addSystemMessage(
+            translate('hud.timeMoonUsage', {}, this.settings.language),
+            'error',
+          );
+          return;
+        }
+
+        this.setMoonPhase(parsedPhase - 1);
+        this.chat.addSystemMessage(
+          translate('hud.timeMoonSuccess', { phase: parsedPhase }, this.settings.language),
+        );
+        return;
+      }
+      default:
+        this.chat.addSystemMessage(translate('hud.timeUsage', {}, this.settings.language), 'error');
+    }
   }
 
   private setClockHour(hour: number): void {
@@ -1029,6 +1079,20 @@ export class Game {
     this.timeOfDay =
       ((normalizedHour - SUNRISE_CLOCK_HOUR + CHAT_CLOCK_HOUR_MAX) % CHAT_CLOCK_HOUR_MAX) /
       CHAT_CLOCK_HOUR_MAX;
+    this.applyCelestialState();
+  }
+
+  private setMoonPhase(phase: number): void {
+    this.moonPhase = ((Math.floor(phase) % MOON_PHASE_COUNT) + MOON_PHASE_COUNT) % MOON_PHASE_COUNT;
+    this.applyCelestialState();
+  }
+
+  private advanceMoonPhase(days = 1): void {
+    this.moonPhase =
+      ((this.moonPhase + Math.floor(days)) % MOON_PHASE_COUNT + MOON_PHASE_COUNT) % MOON_PHASE_COUNT;
+  }
+
+  private applyCelestialState(): void {
     this.renderer.setCelestialState(this.timeOfDay, this.moonPhase);
   }
 

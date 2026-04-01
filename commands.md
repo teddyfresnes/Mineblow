@@ -27,10 +27,32 @@ Exemples:
 - `/time clock 14`
 - `/time clock 20`
 
+### `/time nextday`
+
+Avance d'un jour complet. Pour l'instant, cela sert surtout a faire progresser correctement la phase de la lune.
+
+Exemple:
+
+- `/time nextday`
+
+### `/time moon <1-8>`
+
+Force directement la phase de lune a afficher.
+
+- `1` = phase 1
+- `8` = phase 8
+
+Exemples:
+
+- `/time moon 1`
+- `/time moon 8`
+
 ## Usage en jeu
 
-Si la commande `/time` echoue, le chat affiche son usage directement.
+Si la commande `/time` echoue, le chat affiche l'usage adapte directement.
 
-Format actuel:
+Formats actuels:
 
-`/time clock <0-24>`
+- `/time clock <0-24>`
+- `/time nextday`
+- `/time moon <1-8>`
