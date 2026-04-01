@@ -59,6 +59,9 @@ export class SkyDome {
   private readonly moon: Mesh;
   private readonly moonMaterial: MeshBasicMaterial;
   private readonly moonTexture: Texture;
+  private readonly cameraWorldPosition = new Vector3();
+  private readonly currentSunDirection = SUN_DIRECTION.clone();
+  private readonly currentMoonDirection = SUN_DIRECTION.clone().multiplyScalar(-1);
   private moonPhase = -1;
 
   constructor() {
@@ -177,8 +180,10 @@ export class SkyDome {
     });
   }
 
-  update(cameraX: number, cameraZ: number): void {
-    this.group.position.set(cameraX, 0, cameraZ);
+  update(cameraX: number, cameraY: number, cameraZ: number): void {
+    this.cameraWorldPosition.set(cameraX, cameraY, cameraZ);
+    this.group.position.copy(this.cameraWorldPosition);
+    this.updateCelestialBodies();
   }
 
   setCelestialState(state: SkyDomeState): void {
@@ -188,17 +193,23 @@ export class SkyDome {
     (uniforms.bottomColor.value as Color).copy(state.bottomColor);
     (uniforms.sunDirection.value as Vector3).copy(state.sunDirection);
 
-    this.updateCelestialBody(this.sun, state.sunDirection, SUN_DISTANCE);
+    this.currentSunDirection.copy(state.sunDirection);
     this.sunMaterial.opacity = state.sunIntensity;
 
-    this.updateCelestialBody(this.moon, state.moonDirection, MOON_DISTANCE);
+    this.currentMoonDirection.copy(state.moonDirection);
     this.moonMaterial.opacity = state.moonIntensity;
     this.setMoonPhase(state.moonPhase);
+    this.updateCelestialBodies();
+  }
+
+  private updateCelestialBodies(): void {
+    this.updateCelestialBody(this.sun, this.currentSunDirection, SUN_DISTANCE);
+    this.updateCelestialBody(this.moon, this.currentMoonDirection, MOON_DISTANCE);
   }
 
   private updateCelestialBody(mesh: Mesh, direction: Vector3, distance: number): void {
     mesh.position.copy(direction).normalize().multiplyScalar(distance);
-    mesh.lookAt(0, 0, 0);
+    mesh.lookAt(this.cameraWorldPosition);
   }
 
   private setMoonPhase(phase: number): void {

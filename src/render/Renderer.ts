@@ -374,7 +374,7 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = yaw;
     this.camera.rotation.x = pitch;
-    this.sky.update(position.x, position.z);
+    this.sky.update(position.x, position.y, position.z);
     updateSunForCamera(this.lights, position.x, position.z, this.currentSunDirection);
   }
 
