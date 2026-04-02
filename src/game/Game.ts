@@ -1612,7 +1612,9 @@ export class Game {
     const selectedSlot = inventory.getSlot(inventory.getSelectedAbsoluteSlotIndex());
     const hasHeldBlock = selectedSlot.blockId !== null && selectedSlot.count > 0;
     const firstPersonVisible =
-      this.input.isPointerLocked() && !this.menu.isVisible() && !this.inventoryScreen.isVisible();
+      (this.input.isPointerLocked() || this.chat.isOpen()) &&
+      !this.menu.isVisible() &&
+      !this.inventoryScreen.isVisible();
     this.renderer.setFirstPersonAnimationPreset(hasHeldBlock ? 'item' : 'hand');
     this.renderer.setFirstPersonHandVisible(firstPersonVisible);
     this.renderer.setFirstPersonHeldBlock(
