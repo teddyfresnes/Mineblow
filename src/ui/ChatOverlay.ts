@@ -1,4 +1,5 @@
 import { DEFAULT_UI_LANGUAGE, translate, type UiLanguage } from '../i18n/Language';
+import { ChatInputHistory } from './ChatInputHistory';
 
 export type ChatInputMode = 'chat' | 'command';
 type ChatEntryTone = 'player' | 'command' | 'system' | 'error';
@@ -15,6 +16,7 @@ interface ChatOverlayHandlers {
 
 const CHAT_ENTRY_VISIBLE_MS = 6000;
 const CHAT_ENTRY_LIMIT = 128;
+const CHAT_INPUT_HISTORY_LIMIT = 128;
 const CHAT_AUTO_SCROLL_THRESHOLD_PX = 24;
 
 export class ChatOverlay {
@@ -23,6 +25,7 @@ export class ChatOverlay {
   private readonly composer = document.createElement('div');
   private readonly input = document.createElement('input');
   private readonly entries: ChatEntryRecord[] = [];
+  private readonly submittedHistory = new ChatInputHistory(CHAT_INPUT_HISTORY_LIMIT);
   private language: UiLanguage = DEFAULT_UI_LANGUAGE;
   private composerOpen = false;
   private mode: ChatInputMode = 'chat';
@@ -57,6 +60,30 @@ export class ChatOverlay {
         return;
       }
 
+      if (event.code === 'ArrowUp') {
+        const previousValue = this.submittedHistory.previous(this.input.value);
+        if (previousValue === null) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        this.input.value = previousValue;
+        this.moveCursorToEnd();
+        return;
+      }
+
+      if (event.code === 'ArrowDown') {
+        const nextValue = this.submittedHistory.next();
+        if (nextValue === null) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        this.input.value = nextValue;
+        this.moveCursorToEnd();
+        return;
+      }
+
       if (event.code === 'Enter' || event.code === 'NumpadEnter') {
         event.preventDefault();
         event.stopPropagation();
@@ -64,6 +91,7 @@ export class ChatOverlay {
         if (!submittedValue) {
           return;
         }
+        this.submittedHistory.record(submittedValue);
         this.handlers.onSubmit?.(this.mode, submittedValue);
         return;
       }
@@ -95,18 +123,17 @@ export class ChatOverlay {
     this.composerOpen = true;
     this.mode = mode;
     this.input.value = draft;
+    this.submittedHistory.resetNavigation(draft);
     this.root.classList.add('open');
     this.syncComposerState();
     this.scrollToBottom();
-    window.requestAnimationFrame(() => {
-      this.input.focus();
-      this.input.setSelectionRange(this.input.value.length, this.input.value.length);
-    });
+    this.focusInputAtEnd();
   }
 
   closeComposer(): void {
     this.composerOpen = false;
     this.input.value = '';
+    this.submittedHistory.resetNavigation();
     this.root.classList.remove('open');
     this.input.blur();
     this.syncComposerState();
@@ -121,6 +148,7 @@ export class ChatOverlay {
       entry.element.remove();
     }
     this.entries.length = 0;
+    this.submittedHistory.clear();
     this.closeComposer();
   }
 
@@ -194,6 +222,23 @@ export class ChatOverlay {
 
   private scrollToBottom(): void {
     this.history.scrollTop = this.history.scrollHeight;
+  }
+
+  private focusInputAtEnd(): void {
+    this.input.focus({ preventScroll: true });
+    this.moveCursorToEnd();
+    window.requestAnimationFrame(() => {
+      if (!this.composerOpen) {
+        return;
+      }
+      this.input.focus({ preventScroll: true });
+      this.moveCursorToEnd();
+    });
+  }
+
+  private moveCursorToEnd(): void {
+    const cursorOffset = this.input.value.length;
+    this.input.setSelectionRange(cursorOffset, cursorOffset);
   }
 
   private isNearBottom(): boolean {
