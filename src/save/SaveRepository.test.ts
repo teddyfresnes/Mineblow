@@ -31,6 +31,19 @@ describe('SaveRepository', () => {
         jumps: 3,
         craftedItems: 0,
       },
+      {
+        timeOfDay: 0.25,
+        moonPhase: 3,
+        weather: {
+          preset: 'cloudy_heavy',
+          previousPreset: 'clear',
+          presetElapsedMs: 12_000,
+          presetDurationMs: 90_000,
+          transitionMs: 18_000,
+          windOffsetX: 4,
+          windOffsetZ: -2,
+        },
+      },
     );
 
     await repository.saveChunkDiffs(created.id, [
@@ -51,6 +64,7 @@ describe('SaveRepository', () => {
       count: 4,
     });
     expect(loaded?.save.worldStats.blocksMined).toBe(2);
+    expect(loaded?.save.environment?.weather.preset).toBe('cloudy_heavy');
     expect(worlds).toHaveLength(1);
     expect(worlds[0]?.previewImageDataUrl).toBe('data:image/png;base64,test');
     expect(loaded?.chunkDiffs.get('0,0')).toEqual({

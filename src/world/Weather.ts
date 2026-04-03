@@ -1,21 +1,28 @@
 import {
   WEATHER_PRESET_CHAIN,
+  WEATHER_SKY_PRESET_OPTIONS,
+  type WeatherControlMode,
+  type WeatherOverrides,
   type WeatherPreset,
-  type WorldEnvironmentState,
+  type WeatherSkyPreset,
   type WeatherState,
   type WeatherVisualState,
+  type WorldEnvironmentState,
 } from '../types/weather';
 
-interface WeatherProfile {
-  cloudCover: number;
+export interface WeatherProfile {
+  cloudCoverage: number;
   cloudDensity: number;
+  cloudThickness: number;
+  cloudSharpness: number;
   cloudGrayness: number;
   cloudOpacity: number;
-  sunOcclusion: number;
-  skyDesaturation: number;
+  skyGrayness: number;
+  skyBrightness: number;
+  sunVisibility: number;
   fogDimming: number;
   ambientDimming: number;
-  precipitationIntensity: number;
+  rainIntensity: number;
   windSpeed: number;
   minDurationMs: number;
   maxDurationMs: number;
@@ -23,126 +30,193 @@ interface WeatherProfile {
   maxTransitionMs: number;
 }
 
+interface SkyPresetProfile {
+  skyGrayness: number;
+  skyBrightness: number;
+  sunVisibility: number;
+  fogDimming: number;
+  ambientDimming: number;
+}
+
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
+const clamp01 = (value: number): number => clamp(value, 0, 1);
 const lerp = (from: number, to: number, alpha: number): number => from + (to - from) * alpha;
 
 const WEATHER_PROFILE_BY_PRESET: Record<WeatherPreset, WeatherProfile> = {
   clear: {
-    cloudCover: 0.02,
-    cloudDensity: 0.4,
-    cloudGrayness: 0,
-    cloudOpacity: 0.04,
-    sunOcclusion: 0,
-    skyDesaturation: 0,
-    fogDimming: 0,
-    ambientDimming: 0,
-    precipitationIntensity: 0,
+    cloudCoverage: 0.04,
+    cloudDensity: 0.2,
+    cloudThickness: 0.16,
+    cloudSharpness: 0.84,
+    cloudGrayness: 0.02,
+    cloudOpacity: 0.94,
+    skyGrayness: 0.02,
+    skyBrightness: 1.02,
+    sunVisibility: 0.98,
+    fogDimming: 0.02,
+    ambientDimming: 0.02,
+    rainIntensity: 0,
     windSpeed: 0.0028,
-    minDurationMs: 2 * 60_000,
-    maxDurationMs: 5 * 60_000,
-    minTransitionMs: 20_000,
+    minDurationMs: 95_000,
+    maxDurationMs: 210_000,
+    minTransitionMs: 16_000,
+    maxTransitionMs: 24_000,
+  },
+  cloudy_light: {
+    cloudCoverage: 0.18,
+    cloudDensity: 0.42,
+    cloudThickness: 0.28,
+    cloudSharpness: 0.72,
+    cloudGrayness: 0.05,
+    cloudOpacity: 0.95,
+    skyGrayness: 0.08,
+    skyBrightness: 0.99,
+    sunVisibility: 0.9,
+    fogDimming: 0.05,
+    ambientDimming: 0.08,
+    rainIntensity: 0,
+    windSpeed: 0.0034,
+    minDurationMs: 90_000,
+    maxDurationMs: 185_000,
+    minTransitionMs: 18_000,
     maxTransitionMs: 28_000,
   },
-  few_white: {
-    cloudCover: 0.14,
-    cloudDensity: 0.48,
-    cloudGrayness: 0.06,
-    cloudOpacity: 0.26,
-    sunOcclusion: 0.08,
-    skyDesaturation: 0.03,
-    fogDimming: 0.02,
-    ambientDimming: 0.03,
-    precipitationIntensity: 0,
-    windSpeed: 0.0032,
-    minDurationMs: 2 * 60_000,
-    maxDurationMs: 6 * 60_000,
+  cloudy_heavy: {
+    cloudCoverage: 0.42,
+    cloudDensity: 0.62,
+    cloudThickness: 0.44,
+    cloudSharpness: 0.58,
+    cloudGrayness: 0.1,
+    cloudOpacity: 0.96,
+    skyGrayness: 0.18,
+    skyBrightness: 0.94,
+    sunVisibility: 0.74,
+    fogDimming: 0.12,
+    ambientDimming: 0.16,
+    rainIntensity: 0,
+    windSpeed: 0.0042,
+    minDurationMs: 80_000,
+    maxDurationMs: 165_000,
     minTransitionMs: 22_000,
     maxTransitionMs: 30_000,
   },
-  many_white: {
-    cloudCover: 0.32,
-    cloudDensity: 0.58,
-    cloudGrayness: 0.1,
-    cloudOpacity: 0.42,
-    sunOcclusion: 0.18,
-    skyDesaturation: 0.08,
-    fogDimming: 0.05,
-    ambientDimming: 0.07,
-    precipitationIntensity: 0,
-    windSpeed: 0.0038,
-    minDurationMs: 3 * 60_000,
-    maxDurationMs: 6.5 * 60_000,
-    minTransitionMs: 24_000,
-    maxTransitionMs: 32_000,
-  },
-  gray: {
-    cloudCover: 0.54,
-    cloudDensity: 0.7,
-    cloudGrayness: 0.42,
-    cloudOpacity: 0.58,
-    sunOcclusion: 0.44,
-    skyDesaturation: 0.26,
-    fogDimming: 0.12,
-    ambientDimming: 0.16,
-    precipitationIntensity: 0,
-    windSpeed: 0.0045,
-    minDurationMs: 2.5 * 60_000,
-    maxDurationMs: 5.5 * 60_000,
+  overcast: {
+    cloudCoverage: 0.76,
+    cloudDensity: 0.8,
+    cloudThickness: 0.64,
+    cloudSharpness: 0.42,
+    cloudGrayness: 0.52,
+    cloudOpacity: 0.97,
+    skyGrayness: 0.48,
+    skyBrightness: 0.8,
+    sunVisibility: 0.36,
+    fogDimming: 0.24,
+    ambientDimming: 0.28,
+    rainIntensity: 0,
+    windSpeed: 0.0052,
+    minDurationMs: 75_000,
+    maxDurationMs: 150_000,
     minTransitionMs: 24_000,
     maxTransitionMs: 34_000,
   },
-  overcast: {
-    cloudCover: 0.76,
-    cloudDensity: 0.86,
-    cloudGrayness: 0.66,
-    cloudOpacity: 0.78,
-    sunOcclusion: 0.72,
-    skyDesaturation: 0.42,
-    fogDimming: 0.22,
-    ambientDimming: 0.24,
-    precipitationIntensity: 0,
-    windSpeed: 0.0052,
-    minDurationMs: 2.5 * 60_000,
-    maxDurationMs: 6 * 60_000,
-    minTransitionMs: 28_000,
+  rain_light: {
+    cloudCoverage: 0.88,
+    cloudDensity: 0.88,
+    cloudThickness: 0.78,
+    cloudSharpness: 0.35,
+    cloudGrayness: 0.68,
+    cloudOpacity: 0.98,
+    skyGrayness: 0.62,
+    skyBrightness: 0.72,
+    sunVisibility: 0.18,
+    fogDimming: 0.34,
+    ambientDimming: 0.36,
+    rainIntensity: 0.34,
+    windSpeed: 0.0063,
+    minDurationMs: 70_000,
+    maxDurationMs: 135_000,
+    minTransitionMs: 26_000,
     maxTransitionMs: 36_000,
   },
-  light_precip: {
-    cloudCover: 0.84,
-    cloudDensity: 0.92,
-    cloudGrayness: 0.78,
-    cloudOpacity: 0.86,
-    sunOcclusion: 0.88,
-    skyDesaturation: 0.58,
-    fogDimming: 0.3,
-    ambientDimming: 0.34,
-    precipitationIntensity: 0.45,
-    windSpeed: 0.0061,
-    minDurationMs: 2 * 60_000,
-    maxDurationMs: 5 * 60_000,
+  rain_heavy: {
+    cloudCoverage: 0.96,
+    cloudDensity: 0.95,
+    cloudThickness: 0.9,
+    cloudSharpness: 0.28,
+    cloudGrayness: 0.82,
+    cloudOpacity: 0.99,
+    skyGrayness: 0.76,
+    skyBrightness: 0.62,
+    sunVisibility: 0.08,
+    fogDimming: 0.46,
+    ambientDimming: 0.44,
+    rainIntensity: 0.72,
+    windSpeed: 0.0075,
+    minDurationMs: 55_000,
+    maxDurationMs: 120_000,
     minTransitionMs: 28_000,
-    maxTransitionMs: 38_000,
-  },
-  heavy_precip: {
-    cloudCover: 0.94,
-    cloudDensity: 1,
-    cloudGrayness: 0.9,
-    cloudOpacity: 0.94,
-    sunOcclusion: 0.98,
-    skyDesaturation: 0.72,
-    fogDimming: 0.4,
-    ambientDimming: 0.42,
-    precipitationIntensity: 1,
-    windSpeed: 0.0074,
-    minDurationMs: 2 * 60_000,
-    maxDurationMs: 4.5 * 60_000,
-    minTransitionMs: 30_000,
     maxTransitionMs: 40_000,
+  },
+  storm: {
+    cloudCoverage: 1,
+    cloudDensity: 1,
+    cloudThickness: 1,
+    cloudSharpness: 0.22,
+    cloudGrayness: 0.94,
+    cloudOpacity: 1,
+    skyGrayness: 0.88,
+    skyBrightness: 0.52,
+    sunVisibility: 0.02,
+    fogDimming: 0.56,
+    ambientDimming: 0.52,
+    rainIntensity: 1,
+    windSpeed: 0.0088,
+    minDurationMs: 45_000,
+    maxDurationMs: 95_000,
+    minTransitionMs: 30_000,
+    maxTransitionMs: 42_000,
   },
 };
 
+const SKY_PROFILE_BY_PRESET: Record<Exclude<WeatherSkyPreset, 'auto'>, SkyPresetProfile> = {
+  blue: {
+    skyGrayness: 0.02,
+    skyBrightness: 1.04,
+    sunVisibility: 1,
+    fogDimming: 0.02,
+    ambientDimming: 0.03,
+  },
+  soft: {
+    skyGrayness: 0.22,
+    skyBrightness: 0.9,
+    sunVisibility: 0.66,
+    fogDimming: 0.16,
+    ambientDimming: 0.18,
+  },
+  gray: {
+    skyGrayness: 0.68,
+    skyBrightness: 0.66,
+    sunVisibility: 0.14,
+    fogDimming: 0.38,
+    ambientDimming: 0.38,
+  },
+  storm: {
+    skyGrayness: 0.92,
+    skyBrightness: 0.46,
+    sunVisibility: 0.01,
+    fogDimming: 0.6,
+    ambientDimming: 0.56,
+  },
+};
+
+const DEFAULT_WEATHER_OVERRIDES: WeatherOverrides = {
+  cloudCoverage: null,
+  rainIntensity: null,
+  skyPreset: 'auto',
+};
+
 const getRandomBetween = (min: number, max: number, random: () => number): number =>
-  lerp(min, max, clamp(random(), 0, 1));
+  lerp(min, max, clamp01(random()));
 
 export const DEFAULT_WEATHER_PRESET: WeatherPreset = 'clear';
 export const DEFAULT_TIME_OF_DAY = 0;
@@ -150,6 +224,12 @@ export const DEFAULT_MOON_PHASE = 0;
 
 export const getWeatherProfile = (preset: WeatherPreset): WeatherProfile =>
   WEATHER_PROFILE_BY_PRESET[preset];
+
+export const isWeatherPreset = (value: unknown): value is WeatherPreset =>
+  typeof value === 'string' && WEATHER_PRESET_CHAIN.includes(value as WeatherPreset);
+
+export const isWeatherSkyPreset = (value: unknown): value is WeatherSkyPreset =>
+  typeof value === 'string' && WEATHER_SKY_PRESET_OPTIONS.includes(value as WeatherSkyPreset);
 
 export const createInitialWeatherState = (random: () => number = Math.random): WeatherState => {
   const profile = getWeatherProfile(DEFAULT_WEATHER_PRESET);
@@ -159,19 +239,24 @@ export const createInitialWeatherState = (random: () => number = Math.random): W
     presetElapsedMs: 0,
     presetDurationMs: getRandomBetween(profile.minDurationMs, profile.maxDurationMs, random),
     transitionMs: getRandomBetween(profile.minTransitionMs, profile.maxTransitionMs, random),
-    windOffsetX: random() * 200 - 100,
-    windOffsetZ: random() * 200 - 100,
-    surfaceSnowTarget: 0,
-    surfaceSnowProgressMs: 0,
+    windOffsetX: random() * 240 - 120,
+    windOffsetZ: random() * 240 - 120,
   };
 };
 
-export const clampSurfaceSnowTarget = (value: number): number =>
-  Math.max(0, Math.min(8, Math.floor(value)));
-
-export const isWeatherPreset = (value: unknown): value is WeatherPreset =>
-  typeof value === 'string' &&
-  WEATHER_PRESET_CHAIN.includes(value as WeatherPreset);
+export const normalizeWeatherOverrides = (
+  overrides: Partial<WeatherOverrides> | null | undefined,
+): WeatherOverrides => ({
+  cloudCoverage:
+    typeof overrides?.cloudCoverage === 'number' && Number.isFinite(overrides.cloudCoverage)
+      ? clamp01(overrides.cloudCoverage)
+      : null,
+  rainIntensity:
+    typeof overrides?.rainIntensity === 'number' && Number.isFinite(overrides.rainIntensity)
+      ? clamp01(overrides.rainIntensity)
+      : null,
+  skyPreset: isWeatherSkyPreset(overrides?.skyPreset) ? overrides.skyPreset : 'auto',
+});
 
 export const normalizeWeatherState = (
   state: Partial<WeatherState> | null | undefined,
@@ -208,11 +293,6 @@ export const normalizeWeatherState = (
       typeof state.windOffsetZ === 'number' && Number.isFinite(state.windOffsetZ)
         ? state.windOffsetZ
         : fallback.windOffsetZ,
-    surfaceSnowTarget: clampSurfaceSnowTarget(state.surfaceSnowTarget ?? 0),
-    surfaceSnowProgressMs:
-      typeof state.surfaceSnowProgressMs === 'number' && Number.isFinite(state.surfaceSnowProgressMs)
-        ? state.surfaceSnowProgressMs
-        : 0,
   };
 };
 
@@ -251,11 +331,11 @@ export const pickNextWeatherPreset = (
     return DEFAULT_WEATHER_PRESET;
   }
 
-  const stepRoll = clamp(random(), 0, 0.999999);
+  const stepRoll = clamp01(random());
   let step = 0;
-  if (stepRoll < 0.28) {
+  if (stepRoll < 0.23) {
     step = -1;
-  } else if (stepRoll > 0.72) {
+  } else if (stepRoll > 0.77) {
     step = 1;
   }
 
@@ -284,13 +364,13 @@ export const forceWeatherPreset = (
   retimeWeatherPreset(state, preset, random);
   state.previousPreset = null;
   state.transitionMs = 0;
-  state.surfaceSnowProgressMs = 0;
 };
 
 export const advanceWeatherState = (
   state: WeatherState,
   dtMs: number,
   random: () => number = Math.random,
+  allowPresetTransition = true,
 ): void => {
   if (dtMs <= 0) {
     return;
@@ -300,9 +380,9 @@ export const advanceWeatherState = (
   const profile = getWeatherProfile(state.preset);
   const windStep = profile.windSpeed * dtMs;
   state.windOffsetX += windStep;
-  state.windOffsetZ += windStep * 0.58;
+  state.windOffsetZ += windStep * 0.56;
 
-  if (state.presetElapsedMs < state.presetDurationMs) {
+  if (!allowPresetTransition || state.presetElapsedMs < state.presetDurationMs) {
     return;
   }
 
@@ -310,7 +390,32 @@ export const advanceWeatherState = (
   retimeWeatherPreset(state, nextPreset, random);
 };
 
-export const buildWeatherVisualState = (state: WeatherState): WeatherVisualState => {
+const applySkyOverride = (
+  visual: WeatherVisualState,
+  preset: WeatherSkyPreset,
+): WeatherVisualState => {
+  if (preset === 'auto') {
+    return visual;
+  }
+
+  const profile = SKY_PROFILE_BY_PRESET[preset];
+  return {
+    ...visual,
+    skyGrayness: profile.skyGrayness,
+    skyBrightness: profile.skyBrightness,
+    sunVisibility: profile.sunVisibility,
+    fogDimming: profile.fogDimming,
+    ambientDimming: profile.ambientDimming,
+    skyPreset: preset,
+  };
+};
+
+export const buildWeatherVisualState = (
+  state: WeatherState,
+  mode: WeatherControlMode = 'auto',
+  rawOverrides: Partial<WeatherOverrides> | null | undefined = DEFAULT_WEATHER_OVERRIDES,
+): WeatherVisualState => {
+  const overrides = normalizeWeatherOverrides(rawOverrides);
   const current = getWeatherProfile(state.preset);
   const previousPreset = state.previousPreset && isWeatherPreset(state.previousPreset)
     ? state.previousPreset
@@ -318,40 +423,42 @@ export const buildWeatherVisualState = (state: WeatherState): WeatherVisualState
   const previous = previousPreset ? getWeatherProfile(previousPreset) : current;
   const transitionAlpha =
     state.transitionMs > 0
-      ? clamp(state.presetElapsedMs / state.transitionMs, 0, 1)
+      ? clamp01(state.presetElapsedMs / state.transitionMs)
       : 1;
 
-  return {
+  const baseVisual: WeatherVisualState = {
     preset: state.preset,
     previousPreset,
     transitionAlpha,
-    cloudCover: lerp(previous.cloudCover, current.cloudCover, transitionAlpha),
+    mode,
+    cloudCoverage: lerp(previous.cloudCoverage, current.cloudCoverage, transitionAlpha),
     cloudDensity: lerp(previous.cloudDensity, current.cloudDensity, transitionAlpha),
+    cloudThickness: lerp(previous.cloudThickness, current.cloudThickness, transitionAlpha),
+    cloudSharpness: lerp(previous.cloudSharpness, current.cloudSharpness, transitionAlpha),
     cloudGrayness: lerp(previous.cloudGrayness, current.cloudGrayness, transitionAlpha),
     cloudOpacity: lerp(previous.cloudOpacity, current.cloudOpacity, transitionAlpha),
     windOffsetX: state.windOffsetX,
     windOffsetZ: state.windOffsetZ,
-    sunOcclusion: lerp(previous.sunOcclusion, current.sunOcclusion, transitionAlpha),
-    skyDesaturation: lerp(previous.skyDesaturation, current.skyDesaturation, transitionAlpha),
+    windSpeed: lerp(previous.windSpeed, current.windSpeed, transitionAlpha),
+    skyGrayness: lerp(previous.skyGrayness, current.skyGrayness, transitionAlpha),
+    skyBrightness: lerp(previous.skyBrightness, current.skyBrightness, transitionAlpha),
+    sunVisibility: lerp(previous.sunVisibility, current.sunVisibility, transitionAlpha),
     fogDimming: lerp(previous.fogDimming, current.fogDimming, transitionAlpha),
     ambientDimming: lerp(previous.ambientDimming, current.ambientDimming, transitionAlpha),
-    precipitationIntensity: lerp(
-      previous.precipitationIntensity,
-      current.precipitationIntensity,
-      transitionAlpha,
-    ),
+    rainIntensity: lerp(previous.rainIntensity, current.rainIntensity, transitionAlpha),
+    skyPreset: overrides.skyPreset,
   };
+
+  const withOverrides: WeatherVisualState = {
+    ...baseVisual,
+    cloudCoverage:
+      overrides.cloudCoverage === null ? baseVisual.cloudCoverage : overrides.cloudCoverage,
+    rainIntensity:
+      overrides.rainIntensity === null ? baseVisual.rainIntensity : overrides.rainIntensity,
+  };
+
+  return applySkyOverride(withOverrides, overrides.skyPreset);
 };
 
-export const getSurfaceSnowTargetStepMs = (preset: WeatherPreset): number | null => {
-  if (preset === 'light_precip') {
-    return 180_000;
-  }
-  if (preset === 'heavy_precip') {
-    return 75_000;
-  }
-  if (preset === 'clear' || preset === 'few_white' || preset === 'many_white') {
-    return -120_000;
-  }
-  return null;
-};
+export const createDefaultWeatherVisualState = (): WeatherVisualState =>
+  buildWeatherVisualState(createInitialWeatherState(() => 0.5));

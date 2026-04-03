@@ -56,3 +56,69 @@ Formats actuels:
 - `/time clock <0-24>`
 - `/time nextday`
 - `/time moon <1-8>`
+- `/weather <clear|cloudy_light|cloudy_heavy|overcast|rain_light|rain_heavy|storm>`
+- `/weather auto`
+- `/weather setClouds <0-100|0-1|auto>`
+- `/weather setRain <0-100|0-1|auto>`
+- `/weather setSky <auto|blue|soft|gray|storm>`
+- `/weather debug`
+
+### `/weather <preset>`
+
+Force un preset meteo complet avec transition visuelle propre.
+
+Presets:
+
+- `clear`
+- `cloudy_light`
+- `cloudy_heavy`
+- `overcast`
+- `rain_light`
+- `rain_heavy`
+- `storm`
+
+Exemples:
+
+- `/weather clear`
+- `/weather cloudy_light`
+- `/weather rain_heavy`
+- `/weather storm`
+
+### `/weather auto`
+
+Reactive l'evolution automatique de la meteo.
+
+### `/weather setClouds <0-100|0-1|auto>`
+
+Force uniquement la couverture nuageuse.
+
+Exemples:
+
+- `/weather setClouds 15`
+- `/weather setClouds 0.65`
+- `/weather setClouds auto`
+
+### `/weather setRain <0-100|0-1|auto>`
+
+Force uniquement l'intensite de pluie.
+
+Exemples:
+
+- `/weather setRain 20`
+- `/weather setRain 0.8`
+- `/weather setRain auto`
+
+### `/weather setSky <auto|blue|soft|gray|storm>`
+
+Force uniquement le preset ciel.
+
+Exemples:
+
+- `/weather setSky blue`
+- `/weather setSky gray`
+- `/weather setSky storm`
+- `/weather setSky auto`
+
+### `/weather debug`
+
+Affiche l'etat meteo courant, le mode auto/manuelle et les overrides actifs.

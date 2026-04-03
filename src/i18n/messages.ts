@@ -118,6 +118,21 @@ const fr = {
     timeNextDaySuccess: 'Jour avance de 24h',
     timeMoonUsage: 'Usage: /time moon <1-8> (voir commands.md)',
     timeMoonSuccess: 'Phase de lune reglee sur {phase}',
+    weatherUsage:
+      'Usage: /weather <clear|cloudy_light|cloudy_heavy|overcast|rain_light|rain_heavy|storm> | auto | setClouds <0-100|0-1|auto> | setRain <0-100|0-1|auto> | setSky <auto|blue|soft|gray|storm> | debug',
+    weatherAutoUsage: 'Usage: /weather auto',
+    weatherAutoSuccess: 'Meteo automatique reactivee',
+    weatherPresetSuccess: 'Meteo forcee sur {preset}',
+    weatherSetCloudsUsage: 'Usage: /weather setClouds <0-100|0-1|auto>',
+    weatherSetCloudsSuccess: 'Couverture nuageuse reglee sur {value}',
+    weatherSetRainUsage: 'Usage: /weather setRain <0-100|0-1|auto>',
+    weatherSetRainSuccess: 'Intensite de pluie reglee sur {value}',
+    weatherSetSkyUsage: 'Usage: /weather setSky <auto|blue|soft|gray|storm>',
+    weatherSetSkySuccess: 'Preset ciel regle sur {preset}',
+    weatherDebugUsage: 'Usage: /weather debug',
+    weatherDebugState:
+      'Weather: mode={mode} preset={preset} transition={transition}% clouds={clouds}% rain={rain}% sky={sky} sun={sun}%',
+    weatherDebugOverrides: 'Overrides: clouds={clouds} rain={rain} sky={sky}',
   },
   controls: {
     unbound: 'Non assigne',
@@ -332,6 +347,21 @@ const en: MessageCatalog = {
     timeNextDaySuccess: 'Advanced time by 24 hours',
     timeMoonUsage: 'Usage: /time moon <1-8> (see commands.md)',
     timeMoonSuccess: 'Moon phase set to {phase}',
+    weatherUsage:
+      'Usage: /weather <clear|cloudy_light|cloudy_heavy|overcast|rain_light|rain_heavy|storm> | auto | setClouds <0-100|0-1|auto> | setRain <0-100|0-1|auto> | setSky <auto|blue|soft|gray|storm> | debug',
+    weatherAutoUsage: 'Usage: /weather auto',
+    weatherAutoSuccess: 'Automatic weather resumed',
+    weatherPresetSuccess: 'Weather forced to {preset}',
+    weatherSetCloudsUsage: 'Usage: /weather setClouds <0-100|0-1|auto>',
+    weatherSetCloudsSuccess: 'Cloud coverage set to {value}',
+    weatherSetRainUsage: 'Usage: /weather setRain <0-100|0-1|auto>',
+    weatherSetRainSuccess: 'Rain intensity set to {value}',
+    weatherSetSkyUsage: 'Usage: /weather setSky <auto|blue|soft|gray|storm>',
+    weatherSetSkySuccess: 'Sky preset set to {preset}',
+    weatherDebugUsage: 'Usage: /weather debug',
+    weatherDebugState:
+      'Weather: mode={mode} preset={preset} transition={transition}% clouds={clouds}% rain={rain}% sky={sky} sun={sun}%',
+    weatherDebugOverrides: 'Overrides: clouds={clouds} rain={rain} sky={sky}',
   },
   controls: {
     unbound: 'Unbound',

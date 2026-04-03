@@ -22,6 +22,9 @@ import { Renderer } from '../render/Renderer';
 import { SaveRepository, type LoadedWorld } from '../save/SaveRepository';
 import type { BlockId } from '../types/blocks';
 import type { InventorySlot, PlayerState } from '../types/player';
+import type {
+  WorldEnvironmentState,
+} from '../types/weather';
 import {
   createEmptyGlobalStats,
   createEmptyWorldStats,
@@ -41,6 +44,13 @@ import {
   type SlotInteractEvent,
 } from '../ui/InventoryScreen';
 import { StartMenu } from '../ui/StartMenu';
+import {
+  createInitialEnvironmentState,
+  isWeatherPreset,
+  isWeatherSkyPreset,
+  normalizeEnvironmentState,
+} from '../world/Weather';
+import { WeatherController } from '../world/WeatherController';
 import {
   getWaterLevel,
   getMineDurationMs,
@@ -62,6 +72,7 @@ interface Session {
   player: PlayerController;
   inventory: Inventory;
   worldStats: WorldStats;
+  environment: WorldEnvironmentState;
 }
 
 interface DroppedItem {
@@ -101,9 +112,15 @@ const ITEM_WATER_OUTFLOW_EXIT_IMPULSE_SCALE = 0.84;
 const DAY_NIGHT_CYCLE_SECONDS = 20 * 60;
 const MOON_PHASE_COUNT = 8;
 const CHAT_COMMAND_TIME = 'time';
+const CHAT_COMMAND_WEATHER = 'weather';
 const CHAT_SUBCOMMAND_CLOCK = 'clock';
 const CHAT_SUBCOMMAND_NEXTDAY = 'nextday';
 const CHAT_SUBCOMMAND_MOON = 'moon';
+const CHAT_SUBCOMMAND_AUTO = 'auto';
+const CHAT_SUBCOMMAND_SET_CLOUDS = 'setclouds';
+const CHAT_SUBCOMMAND_SET_RAIN = 'setrain';
+const CHAT_SUBCOMMAND_SET_SKY = 'setsky';
+const CHAT_SUBCOMMAND_DEBUG = 'debug';
 const CHAT_CLOCK_HOUR_MIN = 0;
 const CHAT_CLOCK_HOUR_MAX = 24;
 const CHAT_MOON_PHASE_MIN = 1;
@@ -130,6 +147,7 @@ export class Game {
   private readonly debugOverlay: DebugOverlay;
   private readonly inventoryScreen: InventoryScreen;
   private readonly saveRepository = new SaveRepository();
+  private readonly weatherController = new WeatherController();
   private readonly gameLoop: GameLoop;
   private readonly menuMusic = new Audio(MENU_MUSIC_URL);
   private readonly persistDirtyChunks = debounce(() => {
@@ -461,6 +479,10 @@ export class Game {
 
     this.disposeSessionWorld(this.session);
     this.session = null;
+    this.timeOfDay = 0;
+    this.moonPhase = 0;
+    this.weatherController.reset();
+    this.applyEnvironmentState();
     this.pendingWorldPreviewCapture = null;
     this.input.exitPointerLock();
     this.closeChat(false);
@@ -518,6 +540,7 @@ export class Game {
     };
     const inventory = new Inventory();
     const worldStats = createEmptyWorldStats();
+    const environment = createInitialEnvironmentState();
 
     const createdWorld = await this.saveRepository.createNewWorld(
       nameInput,
@@ -525,6 +548,7 @@ export class Game {
       playerState,
       inventory.snapshot(),
       worldStats,
+      environment,
     );
     this.globalStats = await this.saveRepository.loadGlobalStats();
     this.menu.setGlobalStats(this.globalStats);
@@ -537,6 +561,7 @@ export class Game {
       player: new PlayerController(playerState),
       inventory,
       worldStats,
+      environment,
     }, openPauseOnPointerLockFailure);
   }
 
@@ -562,6 +587,7 @@ export class Game {
     const playerState = this.createSafePlayerState(loaded.save.player, world);
     const inventory = new Inventory(loaded.save.inventory, playerState.selectedSlot);
     const worldStats = this.normalizeWorldStats(loaded.save.worldStats);
+    const environment = normalizeEnvironmentState(loaded.save.environment);
     await this.refreshMenuWorlds(loaded.save.id);
     await this.activateSession({
       id: loaded.save.id,
@@ -571,6 +597,7 @@ export class Game {
       player: new PlayerController(playerState),
       inventory,
       worldStats,
+      environment,
     }, openPauseOnPointerLockFailure);
   }
 
@@ -583,8 +610,9 @@ export class Game {
       this.disposeSessionWorld(previousSession);
     }
     this.session = session;
-    this.timeOfDay = 0;
-    this.moonPhase = 0;
+    this.timeOfDay = session.environment.timeOfDay;
+    this.moonPhase = session.environment.moonPhase;
+    this.weatherController.reset(session.environment.weather);
     this.closeChat(false);
     this.chat.clear();
     this.chat.setVisible(true);
@@ -626,7 +654,7 @@ export class Game {
     this.updateFirstPersonHandVisibility(session.inventory);
     this.markHotbarDirty();
     this.syncHotbarHud();
-    this.renderer.setCelestialState(this.timeOfDay, this.moonPhase);
+    this.applyEnvironmentState();
     this.hud.setGenerating(
       this.settings.developerDebugMode &&
         (session.world.hasPendingGeneration() || session.world.hasPendingMeshes()),
@@ -736,7 +764,7 @@ export class Game {
       this.openChat('chat');
     }
 
-    this.advanceDayNightCycle(dt);
+    this.advanceEnvironment(dt);
     const { world, player, inventory } = this.session;
     const chatOpen = this.chat.isOpen();
 
@@ -894,6 +922,7 @@ export class Game {
       this.updateDroppedItems(dt);
     }
 
+    this.renderer.updateWeatherEffects(dt, player.getCameraPosition());
     this.renderer.updateAnimatedTextures(dt);
     this.renderer.updateTransientEffects(dt);
 
@@ -935,13 +964,14 @@ export class Game {
     this.input.endFrame();
   }
 
-  private advanceDayNightCycle(dt: number): void {
+  private advanceEnvironment(dt: number): void {
     this.timeOfDay += dt / DAY_NIGHT_CYCLE_SECONDS;
     while (this.timeOfDay >= 1) {
       this.timeOfDay -= 1;
       this.advanceMoonPhase();
     }
-    this.applyCelestialState();
+    this.weatherController.update(dt * 1000);
+    this.applyEnvironmentState();
   }
 
   private openChat(mode: ChatInputMode): void {
@@ -999,12 +1029,19 @@ export class Game {
       return;
     }
 
-    if (commandName.toLowerCase() !== CHAT_COMMAND_TIME) {
-      this.chat.addSystemMessage(translate('hud.unknownCommand', {}, this.settings.language), 'error');
-      return;
+    switch (commandName.toLowerCase()) {
+      case CHAT_COMMAND_TIME:
+        this.executeTimeCommand(args);
+        return;
+      case CHAT_COMMAND_WEATHER:
+        this.executeWeatherCommand(args);
+        return;
+      default:
+        this.chat.addSystemMessage(
+          translate('hud.unknownCommand', {}, this.settings.language),
+          'error',
+        );
     }
-
-    this.executeTimeCommand(args);
   }
 
   private executeTimeCommand(args: string[]): void {
@@ -1042,7 +1079,7 @@ export class Game {
         }
 
         this.advanceMoonPhase();
-        this.applyCelestialState();
+        this.applyEnvironmentState();
         this.chat.addSystemMessage(
           translate('hud.timeNextDaySuccess', {}, this.settings.language),
         );
@@ -1074,17 +1111,185 @@ export class Game {
     }
   }
 
+  private executeWeatherCommand(args: string[]): void {
+    const [subcommand = '', ...subcommandArgs] = args;
+    const normalizedSubcommand = subcommand.toLowerCase();
+
+    if (isWeatherPreset(normalizedSubcommand)) {
+      this.weatherController.setPreset(normalizedSubcommand);
+      this.applyEnvironmentState();
+      this.chat.addSystemMessage(
+        translate(
+          'hud.weatherPresetSuccess',
+          { preset: normalizedSubcommand },
+          this.settings.language,
+        ),
+      );
+      return;
+    }
+
+    switch (normalizedSubcommand) {
+      case CHAT_SUBCOMMAND_AUTO:
+        if (subcommandArgs.length !== 0) {
+          this.chat.addSystemMessage(
+            translate('hud.weatherAutoUsage', {}, this.settings.language),
+            'error',
+          );
+          return;
+        }
+
+        this.weatherController.setAutoMode();
+        this.applyEnvironmentState();
+        this.chat.addSystemMessage(
+          translate('hud.weatherAutoSuccess', {}, this.settings.language),
+        );
+        return;
+      case CHAT_SUBCOMMAND_SET_CLOUDS: {
+        const parsedValue = this.parseWeatherControlValue(subcommandArgs[0]);
+        if (subcommandArgs.length !== 1 || parsedValue === 'invalid') {
+          this.chat.addSystemMessage(
+            translate('hud.weatherSetCloudsUsage', {}, this.settings.language),
+            'error',
+          );
+          return;
+        }
+
+        this.weatherController.setCloudCoverage(parsedValue);
+        this.applyEnvironmentState();
+        this.chat.addSystemMessage(
+          translate(
+            'hud.weatherSetCloudsSuccess',
+            { value: parsedValue === null ? 'auto' : `${Math.round(parsedValue * 100)}%` },
+            this.settings.language,
+          ),
+        );
+        return;
+      }
+      case CHAT_SUBCOMMAND_SET_RAIN: {
+        const parsedValue = this.parseWeatherControlValue(subcommandArgs[0]);
+        if (subcommandArgs.length !== 1 || parsedValue === 'invalid') {
+          this.chat.addSystemMessage(
+            translate('hud.weatherSetRainUsage', {}, this.settings.language),
+            'error',
+          );
+          return;
+        }
+
+        this.weatherController.setRainIntensity(parsedValue);
+        this.applyEnvironmentState();
+        this.chat.addSystemMessage(
+          translate(
+            'hud.weatherSetRainSuccess',
+            { value: parsedValue === null ? 'auto' : `${Math.round(parsedValue * 100)}%` },
+            this.settings.language,
+          ),
+        );
+        return;
+      }
+      case CHAT_SUBCOMMAND_SET_SKY: {
+        const rawPreset = subcommandArgs[0]?.toLowerCase();
+        if (subcommandArgs.length !== 1 || !isWeatherSkyPreset(rawPreset)) {
+          this.chat.addSystemMessage(
+            translate('hud.weatherSetSkyUsage', {}, this.settings.language),
+            'error',
+          );
+          return;
+        }
+
+        this.weatherController.setSkyPreset(rawPreset);
+        this.applyEnvironmentState();
+        this.chat.addSystemMessage(
+          translate(
+            'hud.weatherSetSkySuccess',
+            { preset: rawPreset },
+            this.settings.language,
+          ),
+        );
+        return;
+      }
+      case CHAT_SUBCOMMAND_DEBUG:
+        if (subcommandArgs.length !== 0) {
+          this.chat.addSystemMessage(
+            translate('hud.weatherDebugUsage', {}, this.settings.language),
+            'error',
+          );
+          return;
+        }
+        this.printWeatherDebugState();
+        return;
+      default:
+        this.chat.addSystemMessage(
+          translate('hud.weatherUsage', {}, this.settings.language),
+          'error',
+        );
+    }
+  }
+
+  private parseWeatherControlValue(rawValue: string | undefined): number | null | 'invalid' {
+    if (!rawValue) {
+      return 'invalid';
+    }
+
+    const normalizedValue = rawValue.trim().toLowerCase();
+    if (normalizedValue === 'auto') {
+      return null;
+    }
+
+    const parsed = Number.parseFloat(normalizedValue.replace(',', '.'));
+    if (!Number.isFinite(parsed)) {
+      return 'invalid';
+    }
+
+    const percentageNormalized = parsed > 1 ? parsed / 100 : parsed;
+    if (percentageNormalized < 0 || percentageNormalized > 1) {
+      return 'invalid';
+    }
+    return percentageNormalized;
+  }
+
+  private printWeatherDebugState(): void {
+    const debugState = this.weatherController.getDebugState();
+    const visual = debugState.visual;
+    const overrides = debugState.overrides;
+    this.chat.addSystemMessage(
+      translate(
+        'hud.weatherDebugState',
+        {
+          mode: debugState.mode,
+          preset: debugState.preset,
+          transition: Math.round(debugState.transitionAlpha * 100),
+          clouds: Math.round(visual.cloudCoverage * 100),
+          rain: Math.round(visual.rainIntensity * 100),
+          sky: visual.skyPreset,
+          sun: Math.round(visual.sunVisibility * 100),
+        },
+        this.settings.language,
+      ),
+    );
+    this.chat.addSystemMessage(
+      translate(
+        'hud.weatherDebugOverrides',
+        {
+          clouds: overrides.cloudCoverage === null ? 'auto' : `${Math.round(overrides.cloudCoverage * 100)}%`,
+          rain: overrides.rainIntensity === null ? 'auto' : `${Math.round(overrides.rainIntensity * 100)}%`,
+          sky: overrides.skyPreset,
+        },
+        this.settings.language,
+      ),
+    );
+  }
+
   private setClockHour(hour: number): void {
     const normalizedHour = hour % CHAT_CLOCK_HOUR_MAX;
     this.timeOfDay =
       ((normalizedHour - SUNRISE_CLOCK_HOUR + CHAT_CLOCK_HOUR_MAX) % CHAT_CLOCK_HOUR_MAX) /
       CHAT_CLOCK_HOUR_MAX;
-    this.applyCelestialState();
+    this.applyEnvironmentState();
   }
 
   private setMoonPhase(phase: number): void {
     this.moonPhase = ((Math.floor(phase) % MOON_PHASE_COUNT) + MOON_PHASE_COUNT) % MOON_PHASE_COUNT;
-    this.applyCelestialState();
+    this.applyEnvironmentState();
   }
 
   private advanceMoonPhase(days = 1): void {
@@ -1092,8 +1297,12 @@ export class Game {
       ((this.moonPhase + Math.floor(days)) % MOON_PHASE_COUNT + MOON_PHASE_COUNT) % MOON_PHASE_COUNT;
   }
 
-  private applyCelestialState(): void {
+  private applyEnvironmentState(): void {
+    if (this.session) {
+      this.session.environment = this.buildEnvironmentState();
+    }
     this.renderer.setCelestialState(this.timeOfDay, this.moonPhase);
+    this.renderer.setWeatherState(this.weatherController.getVisualState());
   }
 
   private render(): void {
@@ -1595,6 +1804,7 @@ export class Game {
     }
 
     const chunkCoord = this.session.world.getPlayerChunkCoord(playerX, playerZ);
+    const weatherDebug = this.weatherController.getDebugState();
     this.debugOverlay.update(
       [
         `FPS: ${this.fpsValue}`,
@@ -1603,6 +1813,8 @@ export class Game {
         `LOADED: ${this.session.world.getChunkCount()}`,
         `STREAM: ${this.session.world.hasPendingGeneration() || this.session.world.hasPendingMeshes() ? 'busy' : 'steady'}`,
         `SEED: ${this.session.seed}`,
+        `WEATHER: ${weatherDebug.preset} (${weatherDebug.mode})`,
+        `CLOUDS: ${Math.round(weatherDebug.visual.cloudCoverage * 100)}% | RAIN: ${Math.round(weatherDebug.visual.rainIntensity * 100)}%`,
         `MODE: ${this.inventoryScreen.isVisible() ? this.inventoryMode : 'play'}`,
       ].join('\n'),
     );
@@ -2032,16 +2244,27 @@ export class Game {
     this.hud.setLevel(level, progress);
   }
 
+  private buildEnvironmentState(): WorldEnvironmentState {
+    return {
+      timeOfDay: this.timeOfDay,
+      moonPhase: this.moonPhase,
+      weather: this.weatherController.getWeatherState(),
+    };
+  }
+
   private async persistProfile(saveGlobal: boolean): Promise<void> {
     if (!this.session) {
       return;
     }
+
+    this.session.environment = this.buildEnvironmentState();
 
     await this.saveRepository.savePlayer(
       this.session.id,
       this.session.player.getState(),
       this.session.inventory.snapshot(),
       this.session.worldStats,
+      this.session.environment,
     );
 
     if (saveGlobal) {

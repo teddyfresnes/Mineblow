@@ -1,7 +1,6 @@
 import {
   AdditiveBlending,
   BackSide,
-  BoxGeometry,
   ClampToEdgeWrapping,
   Color,
   DoubleSide,
@@ -72,6 +71,7 @@ export class SkyDome {
         horizonColor: { value: new Color('#c9e6ff') },
         bottomColor: { value: new Color('#f7ddb1') },
         sunDirection: { value: SUN_DIRECTION.clone() },
+        sunIntensity: { value: 0.96 },
       },
       vertexShader: `
         varying vec3 vWorldPosition;
@@ -86,6 +86,7 @@ export class SkyDome {
         uniform vec3 horizonColor;
         uniform vec3 bottomColor;
         uniform vec3 sunDirection;
+        uniform float sunIntensity;
         varying vec3 vWorldPosition;
         void main() {
           vec3 dir = normalize(vWorldPosition);
@@ -96,9 +97,9 @@ export class SkyDome {
           float sunGlow = smoothstep(0.985, 0.9992, sunDot);
           float halo = pow(sunDot, 26.0);
           float rays = pow(sunDot, 9.0) * (0.5 + 0.5 * sin(atan(dir.x - sunDirection.x, dir.y - sunDirection.y) * 16.0));
-          color += vec3(1.0, 0.88, 0.62) * sunGlow * 0.12;
-          color += vec3(1.0, 0.82, 0.48) * halo * 0.24;
-          color += vec3(1.0, 0.86, 0.65) * rays * 0.06;
+          color += vec3(1.0, 0.88, 0.62) * sunGlow * 0.12 * sunIntensity;
+          color += vec3(1.0, 0.82, 0.48) * halo * 0.24 * sunIntensity;
+          color += vec3(1.0, 0.86, 0.65) * rays * 0.06 * sunIntensity;
           gl_FragColor = vec4(color, 1.0);
         }
       `,
@@ -154,30 +155,6 @@ export class SkyDome {
       moonIntensity: 0.82,
       moonPhase: 0,
     });
-
-    const cloudMaterial = new MeshBasicMaterial({
-      color: '#ffffff',
-      transparent: true,
-      opacity: 0.18,
-      depthWrite: false,
-    });
-    const cloudGeometry = new BoxGeometry(10, 2.4, 6);
-    const cloudPositions = [
-      [-70, 54, -50],
-      [48, 60, -20],
-      [96, 58, 36],
-      [-108, 62, 18],
-      [8, 56, 88],
-      [-34, 64, 104],
-    ] as const;
-
-    cloudPositions.forEach(([x, y, z], index) => {
-      const cloud = new Mesh(cloudGeometry, cloudMaterial);
-      cloud.position.set(x, y, z);
-      cloud.scale.set(1.4 + (index % 3) * 0.24, 1, 1.15 + (index % 2) * 0.18);
-      cloud.rotation.y = index * 0.28;
-      this.group.add(cloud);
-    });
   }
 
   update(cameraX: number, cameraY: number, cameraZ: number): void {
@@ -192,6 +169,7 @@ export class SkyDome {
     (uniforms.horizonColor.value as Color).copy(state.horizonColor);
     (uniforms.bottomColor.value as Color).copy(state.bottomColor);
     (uniforms.sunDirection.value as Vector3).copy(state.sunDirection);
+    uniforms.sunIntensity.value = state.sunIntensity;
 
     this.currentSunDirection.copy(state.sunDirection);
     this.sunMaterial.opacity = state.sunIntensity;

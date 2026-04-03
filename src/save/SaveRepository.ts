@@ -9,6 +9,7 @@ import {
 } from '../game/Controls';
 import { DEFAULT_UI_LANGUAGE } from '../i18n/Language';
 import type { InventorySlot, PlayerState } from '../types/player';
+import type { WorldEnvironmentState } from '../types/weather';
 import {
   createEmptyGlobalStats,
   type ChunkDiffRecord,
@@ -30,6 +31,7 @@ import {
   isStoredSettings,
   isWorldSave,
 } from './SaveSchema';
+import { normalizeEnvironmentState } from '../world/Weather';
 
 interface MineblowDb extends DBSchema {
   meta: {
@@ -202,6 +204,7 @@ export class SaveRepository {
       ...save,
       updatedAt: now,
       lastPlayedAt: now,
+      environment: normalizeEnvironmentState(save.environment),
     };
     await worldStore.put(updatedSave, updatedSave.id);
     await transaction.objectStore('meta').put(
@@ -250,6 +253,7 @@ export class SaveRepository {
     player: PlayerState,
     inventory: InventorySlot[],
     worldStats: WorldStats,
+    environment: WorldEnvironmentState,
   ): Promise<WorldSave> {
     await this.ensureMigrated();
     const db = await this.getDb();
@@ -269,6 +273,7 @@ export class SaveRepository {
       player,
       inventory,
       worldStats,
+      environment: normalizeEnvironmentState(environment),
     };
 
     const transaction = db.transaction(['worlds', 'meta', 'globalStats'], 'readwrite');
@@ -387,6 +392,7 @@ export class SaveRepository {
     player: PlayerState,
     inventory: InventorySlot[],
     worldStats: WorldStats,
+    environment: WorldEnvironmentState,
   ): Promise<void> {
     await this.ensureMigrated();
     const db = await this.getDb();
@@ -402,6 +408,7 @@ export class SaveRepository {
         player,
         inventory,
         worldStats,
+        environment: normalizeEnvironmentState(environment),
         updatedAt: new Date().toISOString(),
       },
       current.id,
@@ -566,6 +573,7 @@ export class SaveRepository {
       player: legacyValue.player as PlayerState,
       inventory: legacyValue.inventory as InventorySlot[],
       worldStats: legacyValue.worldStats,
+      environment: normalizeEnvironmentState(null),
     };
 
     const transaction = db.transaction(['worlds', 'chunkDiffs', 'meta'], 'readwrite');

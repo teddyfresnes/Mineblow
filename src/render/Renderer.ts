@@ -1,11 +1,11 @@
 import {
   ACESFilmicToneMapping,
   AmbientLight,
-  DoubleSide,
   BufferAttribute,
   BoxGeometry,
   BufferGeometry,
   Color,
+  DoubleSide,
   DirectionalLight,
   Fog,
   FrontSide,
@@ -22,12 +22,16 @@ import {
 } from 'three';
 import { WORLD_CONFIG } from '../game/Config';
 import type { BlockId } from '../types/blocks';
+import type { WeatherVisualState } from '../types/weather';
 import type { VoxelHit } from '../types/world';
+import { createDefaultWeatherVisualState } from '../world/Weather';
 import { getBlockDefinition } from '../world/BlockRegistry';
+import { RainField } from './RainField';
 import { SUN_DIRECTION, addSceneLights, type SceneLights, updateSunForCamera } from './SceneLights';
 import { createFirstPersonHand, disposeModel, loadSkinTexture } from './SkinModel';
 import { SkyDome } from './SkyDome';
 import { TextureAtlas } from './TextureAtlas';
+import { VoxelCloudLayer } from './VoxelCloudLayer';
 
 const BASE_FOV = 75;
 const SPRINT_FOV_BOOST = 4.65;
@@ -61,6 +65,8 @@ const WATER_SURFACE_LINE_COLOR = new Color('#b9d8ff');
 const WATER_SURFACE_LINE_STRENGTH_SHALLOW = 0.24;
 const WATER_SURFACE_LINE_STRENGTH_DEEP = 0.1;
 const AIR_FOG_COLOR = '#95b9dd';
+const OVERCAST_FOG_COLOR = '#7b8996';
+const STORM_FOG_COLOR = '#5f6975';
 const AIR_FOG_NEAR = 60;
 const AIR_FOG_FAR = 190;
 const AIR_EXPOSURE = 1.03;
@@ -71,9 +77,17 @@ const TWILIGHT_FOG_COLOR = '#d38d6a';
 const NIGHT_FOG_COLOR = '#101a29';
 const TWILIGHT_BACKGROUND_COLOR = '#d79d76';
 const NIGHT_BACKGROUND_COLOR = '#060b14';
+const OVERCAST_BACKGROUND_COLOR = '#aab4bf';
+const STORM_BACKGROUND_COLOR = '#7a828b';
 const DAY_SKY_TOP_COLOR = '#7eb8f7';
 const DAY_SKY_HORIZON_COLOR = '#c9e6ff';
 const DAY_SKY_BOTTOM_COLOR = '#f7ddb1';
+const OVERCAST_SKY_TOP_COLOR = '#6f7f91';
+const OVERCAST_SKY_HORIZON_COLOR = '#a8b4c0';
+const OVERCAST_SKY_BOTTOM_COLOR = '#c9d0d5';
+const STORM_SKY_TOP_COLOR = '#4e5964';
+const STORM_SKY_HORIZON_COLOR = '#69727c';
+const STORM_SKY_BOTTOM_COLOR = '#8e949b';
 const TWILIGHT_SKY_TOP_COLOR = '#4f6ea8';
 const TWILIGHT_SKY_HORIZON_COLOR = '#f09a68';
 const TWILIGHT_SKY_BOTTOM_COLOR = '#ffd29b';
@@ -167,6 +181,8 @@ export class Renderer {
   readonly handCamera = new PerspectiveCamera(BASE_FOV, 1, HAND_OVERLAY_NEAR, HAND_OVERLAY_FAR);
   readonly atlas = new TextureAtlas();
   readonly sky = new SkyDome();
+  readonly clouds = new VoxelCloudLayer();
+  readonly rain = new RainField();
 
   private readonly renderer: WebGLRenderer;
   private readonly waterMaterial: MeshLambertMaterial;
@@ -181,17 +197,27 @@ export class Renderer {
   private readonly lights: SceneLights;
   private readonly sceneFog: Fog;
   private readonly airFogColor = new Color(AIR_FOG_COLOR);
+  private readonly overcastFogColor = new Color(OVERCAST_FOG_COLOR);
+  private readonly stormFogColor = new Color(STORM_FOG_COLOR);
   private readonly currentAirFogColor = new Color(AIR_FOG_COLOR);
   private readonly twilightFogColor = new Color(TWILIGHT_FOG_COLOR);
   private readonly nightFogColor = new Color(NIGHT_FOG_COLOR);
   private readonly underwaterFogColor = new Color(UNDERWATER_FOG_COLOR);
   private readonly underwaterDeepFogColor = new Color(UNDERWATER_DEEP_FOG_COLOR);
   private readonly airBackgroundColor = new Color(WORLD_CONFIG.skyColor);
+  private readonly overcastBackgroundColor = new Color(OVERCAST_BACKGROUND_COLOR);
+  private readonly stormBackgroundColor = new Color(STORM_BACKGROUND_COLOR);
   private readonly twilightBackgroundColor = new Color(TWILIGHT_BACKGROUND_COLOR);
   private readonly nightBackgroundColor = new Color(NIGHT_BACKGROUND_COLOR);
   private readonly daySkyTopColor = new Color(DAY_SKY_TOP_COLOR);
   private readonly daySkyHorizonColor = new Color(DAY_SKY_HORIZON_COLOR);
   private readonly daySkyBottomColor = new Color(DAY_SKY_BOTTOM_COLOR);
+  private readonly overcastSkyTopColor = new Color(OVERCAST_SKY_TOP_COLOR);
+  private readonly overcastSkyHorizonColor = new Color(OVERCAST_SKY_HORIZON_COLOR);
+  private readonly overcastSkyBottomColor = new Color(OVERCAST_SKY_BOTTOM_COLOR);
+  private readonly stormSkyTopColor = new Color(STORM_SKY_TOP_COLOR);
+  private readonly stormSkyHorizonColor = new Color(STORM_SKY_HORIZON_COLOR);
+  private readonly stormSkyBottomColor = new Color(STORM_SKY_BOTTOM_COLOR);
   private readonly twilightSkyTopColor = new Color(TWILIGHT_SKY_TOP_COLOR);
   private readonly twilightSkyHorizonColor = new Color(TWILIGHT_SKY_HORIZON_COLOR);
   private readonly twilightSkyBottomColor = new Color(TWILIGHT_SKY_BOTTOM_COLOR);
@@ -204,6 +230,7 @@ export class Renderer {
   private readonly skyBottomColor = new Color(DAY_SKY_BOTTOM_COLOR);
   private readonly currentSunDirection = SUN_DIRECTION.clone();
   private readonly currentMoonDirection = SUN_DIRECTION.clone().multiplyScalar(-1);
+  private readonly weatherState: WeatherVisualState = createDefaultWeatherVisualState();
   private readonly miningOverlay: Mesh;
   private readonly handRig = new Group();
   private readonly heldItemAnchor = new Group();
@@ -322,6 +349,8 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     };
     this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v4';
     this.scene.add(this.sky.group);
+    this.scene.add(this.clouds.group);
+    this.scene.add(this.rain.group);
     this.scene.add(this.camera);
     this.handScene.add(this.handCamera);
     this.handCamera.add(this.handRig);
@@ -338,6 +367,8 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.baseAmbientIntensity = this.lights.ambient.intensity;
     this.baseSkyBounceIntensity = this.lights.skyBounce.intensity;
     this.baseSunIntensity = this.lights.sun.intensity;
+    this.clouds.setWeatherState(this.weatherState);
+    this.rain.setWeatherState(this.weatherState);
     this.setCelestialState(0, 0);
     updateSunForCamera(this.lights, 0, 0, this.currentSunDirection);
     void this.setPlayerSkin(null);
@@ -376,6 +407,42 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.camera.rotation.x = pitch;
     this.sky.update(position.x, position.y, position.z);
     updateSunForCamera(this.lights, position.x, position.z, this.currentSunDirection);
+  }
+
+  setWeatherState(state: WeatherVisualState): void {
+    this.weatherState.preset = state.preset;
+    this.weatherState.previousPreset = state.previousPreset;
+    this.weatherState.transitionAlpha = state.transitionAlpha;
+    this.weatherState.mode = state.mode;
+    this.weatherState.cloudCoverage = state.cloudCoverage;
+    this.weatherState.cloudDensity = state.cloudDensity;
+    this.weatherState.cloudThickness = state.cloudThickness;
+    this.weatherState.cloudSharpness = state.cloudSharpness;
+    this.weatherState.cloudGrayness = state.cloudGrayness;
+    this.weatherState.cloudOpacity = state.cloudOpacity;
+    this.weatherState.windOffsetX = state.windOffsetX;
+    this.weatherState.windOffsetZ = state.windOffsetZ;
+    this.weatherState.windSpeed = state.windSpeed;
+    this.weatherState.skyGrayness = state.skyGrayness;
+    this.weatherState.skyBrightness = state.skyBrightness;
+    this.weatherState.sunVisibility = state.sunVisibility;
+    this.weatherState.fogDimming = state.fogDimming;
+    this.weatherState.ambientDimming = state.ambientDimming;
+    this.weatherState.rainIntensity = state.rainIntensity;
+    this.weatherState.skyPreset = state.skyPreset;
+
+    this.clouds.setWeatherState(this.weatherState);
+    this.rain.setWeatherState(this.weatherState);
+    this.updateAirAtmosphere();
+    this.applyViewAtmosphere();
+  }
+
+  updateWeatherEffects(
+    dt: number,
+    cameraPosition: { x: number; y: number; z: number },
+  ): void {
+    this.clouds.update(cameraPosition.x, cameraPosition.y, cameraPosition.z);
+    this.rain.update(dt, cameraPosition.x, cameraPosition.y, cameraPosition.z);
   }
 
   upsertChunkMesh(
@@ -595,26 +662,59 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     const daylight = smoothstep(-0.12, 0.18, sunHeight);
     const twilight = 1 - smoothstep(0.04, 0.34, Math.abs(sunHeight));
     const directSun = smoothstep(-0.03, 0.16, sunHeight);
-    const moonGlow = smoothstep(-0.14, 0.14, moonHeight) * (0.32 + (1 - daylight) * 0.58);
+    const dayWeatherInfluence = clamp01(daylight + twilight * 0.42);
+    const skyGrayness = clamp01(this.weatherState.skyGrayness);
+    const skyBrightness = clamp01(this.weatherState.skyBrightness);
+    const sunVisibility = clamp01(this.weatherState.sunVisibility);
+    const fogDimming = clamp01(this.weatherState.fogDimming);
+    const ambientDimming = clamp01(this.weatherState.ambientDimming);
+    const stormBlend = clamp01(this.weatherState.rainIntensity * 0.68 + Math.max(0, skyGrayness - 0.55));
+    const moonGlow =
+      smoothstep(-0.14, 0.14, moonHeight) *
+      (0.32 + (1 - daylight) * 0.58) *
+      lerp(1, 0.52, skyGrayness * dayWeatherInfluence);
 
     this.skyTopColor.copy(this.nightSkyTopColor).lerp(this.daySkyTopColor, daylight);
     this.skyTopColor.lerp(this.twilightSkyTopColor, twilight * 0.34);
+    this.skyTopColor.lerp(this.overcastSkyTopColor, skyGrayness * dayWeatherInfluence);
+    this.skyTopColor.lerp(this.stormSkyTopColor, stormBlend * dayWeatherInfluence);
     this.skyHorizonColor.copy(this.nightSkyHorizonColor).lerp(this.daySkyHorizonColor, daylight);
     this.skyHorizonColor.lerp(this.twilightSkyHorizonColor, twilight * 0.66);
+    this.skyHorizonColor.lerp(this.overcastSkyHorizonColor, skyGrayness * dayWeatherInfluence);
+    this.skyHorizonColor.lerp(this.stormSkyHorizonColor, stormBlend * dayWeatherInfluence);
     this.skyBottomColor.copy(this.nightSkyBottomColor).lerp(this.daySkyBottomColor, daylight);
     this.skyBottomColor.lerp(this.twilightSkyBottomColor, twilight * 0.56);
+    this.skyBottomColor.lerp(this.overcastSkyBottomColor, skyGrayness * dayWeatherInfluence);
+    this.skyBottomColor.lerp(this.stormSkyBottomColor, stormBlend * dayWeatherInfluence);
+    this.skyTopColor.multiplyScalar(lerp(1, skyBrightness, dayWeatherInfluence));
+    this.skyHorizonColor.multiplyScalar(lerp(1, skyBrightness, dayWeatherInfluence));
+    this.skyBottomColor.multiplyScalar(lerp(1, skyBrightness, dayWeatherInfluence));
 
     this.currentAirFogColor.copy(this.nightFogColor).lerp(this.airFogColor, daylight);
     this.currentAirFogColor.lerp(this.twilightFogColor, twilight * 0.42);
+    this.currentAirFogColor.lerp(this.overcastFogColor, skyGrayness * dayWeatherInfluence);
+    this.currentAirFogColor.lerp(this.stormFogColor, stormBlend * dayWeatherInfluence);
     this.airBackgroundColor.copy(this.nightBackgroundColor).lerp(this.daySkyHorizonColor, daylight);
     this.airBackgroundColor.lerp(this.twilightBackgroundColor, twilight * 0.32);
+    this.airBackgroundColor.lerp(this.overcastBackgroundColor, skyGrayness * dayWeatherInfluence);
+    this.airBackgroundColor.lerp(this.stormBackgroundColor, stormBlend * dayWeatherInfluence);
 
-    this.airFogNear = lerp(AIR_FOG_NEAR_NIGHT, AIR_FOG_NEAR, daylight);
-    this.airFogFar = lerp(AIR_FOG_FAR_NIGHT, AIR_FOG_FAR, daylight);
-    this.airExposure = lerp(AIR_EXPOSURE_NIGHT, AIR_EXPOSURE, daylight);
-    this.airAmbientIntensity = this.baseAmbientIntensity * lerp(0.18, 1, daylight) + twilight * 0.04;
-    this.airSkyBounceIntensity = this.baseSkyBounceIntensity * lerp(0.14, 1, daylight) + twilight * 0.05;
-    this.airSunIntensity = this.baseSunIntensity * directSun;
+    this.airFogNear =
+      lerp(AIR_FOG_NEAR_NIGHT, AIR_FOG_NEAR, daylight) *
+      lerp(1, 0.82, fogDimming);
+    this.airFogFar =
+      lerp(AIR_FOG_FAR_NIGHT, AIR_FOG_FAR, daylight) *
+      lerp(1, 0.54, fogDimming);
+    this.airExposure =
+      lerp(AIR_EXPOSURE_NIGHT, AIR_EXPOSURE, daylight) *
+      lerp(0.76, 1, skyBrightness);
+    this.airAmbientIntensity =
+      (this.baseAmbientIntensity * lerp(0.18, 1, daylight) + twilight * 0.04) *
+      lerp(1, 0.74, ambientDimming);
+    this.airSkyBounceIntensity =
+      (this.baseSkyBounceIntensity * lerp(0.14, 1, daylight) + twilight * 0.05) *
+      lerp(1, 0.68, ambientDimming);
+    this.airSunIntensity = this.baseSunIntensity * directSun * sunVisibility;
 
     this.sky.setCelestialState({
       topColor: this.skyTopColor,
@@ -622,7 +722,7 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
       bottomColor: this.skyBottomColor,
       sunDirection: this.currentSunDirection,
       moonDirection: this.currentMoonDirection,
-      sunIntensity: lerp(0.18, 0.96, directSun),
+      sunIntensity: lerp(0.18, 0.96, directSun) * sunVisibility,
       moonIntensity: moonGlow,
       moonPhase: this.moonPhase,
     });
@@ -681,6 +781,8 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.underwaterEnabled = enabled;
     this.underwaterDepth = depth;
     this.sky.group.visible = !enabled;
+    this.clouds.group.visible = !enabled;
+    this.rain.group.visible = !enabled;
     if (!enabled) {
       this.waterSurfaceLineStrength = 0;
       if (this.waterSurfaceLineStrengthUniform) {

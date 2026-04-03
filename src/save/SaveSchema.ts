@@ -1,5 +1,6 @@
 import { CONTROL_ACTIONS, MAX_INTERFACE_SIZE, MIN_INTERFACE_SIZE } from '../game/Controls';
 import { isUiLanguage } from '../i18n/Language';
+import { WEATHER_PRESET_CHAIN } from '../types/weather';
 import type {
   ChunkDiffRecord,
   StoredAppMeta,
@@ -51,6 +52,9 @@ const isStringOrNull = (value: unknown): value is string | null =>
 const isIsoString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
 
+const isWeatherPresetValue = (value: unknown): boolean =>
+  typeof value === 'string' && WEATHER_PRESET_CHAIN.includes(value as (typeof WEATHER_PRESET_CHAIN)[number]);
+
 const isInterfaceSize = (value: unknown): value is number =>
   isFiniteNumber(value) &&
   Number.isInteger(value) &&
@@ -97,6 +101,36 @@ const isPlayerState = (value: unknown): boolean => {
   );
 };
 
+const isWeatherState = (value: unknown): boolean => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const weather = value as Record<string, unknown>;
+  return (
+    isWeatherPresetValue(weather.preset) &&
+    (typeof weather.previousPreset === 'undefined' ||
+      weather.previousPreset === null ||
+      isWeatherPresetValue(weather.previousPreset)) &&
+    isFiniteNumber(weather.presetElapsedMs) &&
+    isFiniteNumber(weather.presetDurationMs) &&
+    isFiniteNumber(weather.transitionMs) &&
+    isFiniteNumber(weather.windOffsetX) &&
+    isFiniteNumber(weather.windOffsetZ)
+  );
+};
+
+const isEnvironmentState = (value: unknown): boolean => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const environment = value as Record<string, unknown>;
+  return (
+    isFiniteNumber(environment.timeOfDay) &&
+    isFiniteNumber(environment.moonPhase) &&
+    isWeatherState(environment.weather)
+  );
+};
+
 export const isWorldSave = (value: unknown): value is WorldSave => {
   if (!value || typeof value !== 'object') {
     return false;
@@ -104,8 +138,9 @@ export const isWorldSave = (value: unknown): value is WorldSave => {
 
   const candidate = value as WorldSave;
   const previewImageDataUrl = (candidate as { previewImageDataUrl?: unknown }).previewImageDataUrl;
+  const environment = (candidate as { environment?: unknown }).environment;
   return (
-    candidate.schemaVersion === 5 &&
+    (candidate.schemaVersion === 5 || candidate.schemaVersion === 6) &&
     typeof candidate.id === 'string' &&
     candidate.id.length > 0 &&
     typeof candidate.worldId === 'string' &&
@@ -119,7 +154,8 @@ export const isWorldSave = (value: unknown): value is WorldSave => {
     isIsoString(candidate.lastPlayedAt) &&
     isPlayerState(candidate.player) &&
     isInventorySnapshot(candidate.inventory) &&
-    isWorldStats(candidate.worldStats)
+    isWorldStats(candidate.worldStats) &&
+    (typeof environment === 'undefined' || isEnvironmentState(environment))
   );
 };
 

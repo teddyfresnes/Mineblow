@@ -74,7 +74,7 @@ export const PLAYER_CONFIG = {
 } as const;
 
 export const SAVE_CONFIG = {
-  schemaVersion: 5 as const,
+  schemaVersion: 6 as const,
   databaseVersion: 3 as const,
   legacyWorldId: 'default-world' as const,
   appMetaKey: 'app-meta' as const,

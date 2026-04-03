@@ -1,5 +1,6 @@
 import type { BlockId } from './blocks';
 import type { InventorySlot, PlayerState } from './player';
+import type { WorldEnvironmentState } from './weather';
 import type { GameSettings } from '../game/Controls';
 
 export interface ChunkDiffEntry {
@@ -49,10 +50,11 @@ export interface WorldSummary {
 }
 
 export interface WorldSave extends WorldSummary {
-  schemaVersion: 5;
+  schemaVersion: 5 | 6;
   worldId: string;
   player: PlayerState;
   inventory: InventorySlot[];
+  environment?: WorldEnvironmentState;
 }
 
 export interface StoredSettings extends GameSettings {
