@@ -1,6 +1,7 @@
 import {
   Box3,
   BufferAttribute,
+  Color,
   DoubleSide,
   DynamicDrawUsage,
   Frustum,
@@ -35,17 +36,23 @@ const RAIN_GRID_CENTER = RAIN_GRID_SIZE / 2;
 const RAIN_DIRECTION_X = new Float32Array(RAIN_GRID_SIZE * RAIN_GRID_SIZE);
 const RAIN_DIRECTION_Z = new Float32Array(RAIN_GRID_SIZE * RAIN_GRID_SIZE);
 
-const RAIN_RENDER_RADIUS = 10;
-const RAIN_VERTICAL_RANGE = 10;
-const RAIN_COLUMN_HALF_WIDTH = 0.5;
+const RAIN_MIN_RENDER_RADIUS = 5;
+const RAIN_MAX_RENDER_RADIUS = 7;
+const RAIN_VERTICAL_RANGE = 8;
+const RAIN_COLUMN_HALF_WIDTH = 0.38;
 const RAIN_UV_SCALE_PER_BLOCK = 0.25;
 const RAIN_SCROLL_SPEED_BASE = (1 / 0.05 / 32) * 3;
 const RAIN_SCROLL_SPEED_RANGE = 1 / 0.05 / 32;
 const RAIN_BASE_OPACITY = 0.78;
-const RAIN_MAX_INSTANCES = (RAIN_RENDER_RADIUS * 2 + 1) * (RAIN_RENDER_RADIUS * 2 + 1);
-const SPLASH_BASE_SIZE = 0.34;
+const RAIN_MAX_INSTANCES =
+  (RAIN_MAX_RENDER_RADIUS * 2 + 1) * (RAIN_MAX_RENDER_RADIUS * 2 + 1);
+const SPLASHES_PER_COLUMN = 3;
+const SPLASH_MAX_INSTANCES = RAIN_MAX_INSTANCES * SPLASHES_PER_COLUMN;
+const SPLASH_BASE_SIZE = 0.075;
+const SPLASH_SPREAD = 0.72;
 const SPLASH_HEIGHT_OFFSET = 0.035;
-const SPLASH_OPACITY = 0.42;
+const SPLASH_OPACITY = 0.28;
+const SPLASH_COLOR = new Color(44 / 255, 95 / 255, 111 / 255);
 const CACHE_PRUNE_INTERVAL_FRAMES = 60;
 const CACHE_MAX_AGE_FRAMES = 180;
 
@@ -74,8 +81,7 @@ export interface StableRainColumnVariation {
   readonly scrollOffset: number;
   readonly scrollSpeed: number;
   readonly alphaJitter: number;
-  readonly splashSize: number;
-  readonly splashPhase: number;
+  readonly splashSeed: number;
 }
 
 export interface RainChunkColumn {
@@ -101,6 +107,8 @@ const hash32 = (value: number): number => {
 const hash2D = (x: number, z: number): number => hash32(Math.imul(x, 0x45d9f3b) ^ Math.imul(z, 0x119de1f3));
 
 const toUnitFloat = (hash: number, shift: number): number => ((hash >>> shift) & 0xff) / 255;
+const toLocalCoord = (value: number): number =>
+  ((value % WORLD_CONFIG.chunkSizeX) + WORLD_CONFIG.chunkSizeX) % WORLD_CONFIG.chunkSizeX;
 
 const isPrecipitationBlockingBlock = (blockId: BlockId): boolean =>
   blockId !== 0 && (isSolidBlock(blockId) || isWaterBlock(blockId));
@@ -250,6 +258,7 @@ const createSplashMaterial = (): ShaderMaterial =>
       UniformsLib.fog,
       {
         uOpacity: { value: 0 },
+        uColor: { value: SPLASH_COLOR.clone() },
       },
     ]),
     transparent: true,
@@ -261,11 +270,9 @@ const createSplashMaterial = (): ShaderMaterial =>
       attribute vec3 instanceCenter;
       attribute float instanceSize;
       attribute float instanceAlpha;
-      attribute float instancePhase;
 
       varying vec2 vSplashUv;
       varying float vSplashAlpha;
-      varying float vSplashPhase;
 
       #include <fog_pars_vertex>
 
@@ -278,7 +285,6 @@ const createSplashMaterial = (): ShaderMaterial =>
 
         vSplashUv = uv;
         vSplashAlpha = instanceAlpha;
-        vSplashPhase = instancePhase;
 
         vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
         gl_Position = projectionMatrix * mvPosition;
@@ -288,26 +294,23 @@ const createSplashMaterial = (): ShaderMaterial =>
     `,
     fragmentShader: `
       uniform float uOpacity;
+      uniform vec3 uColor;
 
       varying vec2 vSplashUv;
       varying float vSplashAlpha;
-      varying float vSplashPhase;
 
       #include <fog_pars_fragment>
 
       void main() {
         vec2 centered = vSplashUv - 0.5;
-        float radial = length(centered);
-        float ring = smoothstep(0.42, 0.16, radial);
-        float streak = smoothstep(0.18, 0.02, abs(centered.x)) + smoothstep(0.18, 0.02, abs(centered.y));
-        float pulse = 0.72 + 0.28 * sin(vSplashPhase);
-        float alpha = (ring * 0.45 + streak * 0.22) * vSplashAlpha * uOpacity * pulse;
+        float radial = dot(centered, centered);
+        float alpha = smoothstep(0.12, 0.005, radial) * vSplashAlpha * uOpacity;
 
         if (alpha <= 0.01) {
           discard;
         }
 
-        gl_FragColor = vec4(0.76, 0.86, 0.94, alpha);
+        gl_FragColor = vec4(uColor, alpha);
 
         #include <fog_fragment>
       }
@@ -325,8 +328,7 @@ export const buildStableRainColumnVariation = (worldX: number, worldZ: number): 
     scrollOffset: toUnitFloat(hash, 0),
     scrollSpeed: RAIN_SCROLL_SPEED_BASE + toUnitFloat(hash, 8) * RAIN_SCROLL_SPEED_RANGE,
     alphaJitter: lerp(0.88, 1.08, toUnitFloat(hash, 16)),
-    splashSize: lerp(0.82, 1.22, toUnitFloat(hash, 24)),
-    splashPhase: toUnitFloat(hash32(hash ^ 0x5f3759df), 8) * Math.PI * 2,
+    splashSeed: hash32(hash ^ 0x5f3759df) ^ Math.floor(toUnitFloat(hash, 24) * 65535),
   };
 };
 
@@ -415,10 +417,9 @@ export class RainField {
   private readonly rainVScales = new Float32Array(RAIN_MAX_INSTANCES);
   private readonly rainVOffsets = new Float32Array(RAIN_MAX_INSTANCES);
   private readonly rainAlphas = new Float32Array(RAIN_MAX_INSTANCES);
-  private readonly splashCenters = new Float32Array(RAIN_MAX_INSTANCES * 3);
-  private readonly splashSizes = new Float32Array(RAIN_MAX_INSTANCES);
-  private readonly splashAlphas = new Float32Array(RAIN_MAX_INSTANCES);
-  private readonly splashPhases = new Float32Array(RAIN_MAX_INSTANCES);
+  private readonly splashCenters = new Float32Array(SPLASH_MAX_INSTANCES * 3);
+  private readonly splashSizes = new Float32Array(SPLASH_MAX_INSTANCES);
+  private readonly splashAlphas = new Float32Array(SPLASH_MAX_INSTANCES);
   private readonly frustum = new Frustum();
   private readonly frustumMatrix = new Matrix4();
   private readonly chunkCaches = new Map<string, RainChunkCache>();
@@ -427,6 +428,9 @@ export class RainField {
   private frameId = 0;
 
   constructor() {
+    this.group.visible = false;
+    this.group.matrixAutoUpdate = false;
+    this.group.updateMatrix();
     this.rainGeometry.setAttribute(
       'instanceCenter',
       setDynamicUsage(new InstancedBufferAttribute(this.rainCenters, 3)),
@@ -464,14 +468,14 @@ export class RainField {
       'instanceAlpha',
       setDynamicUsage(new InstancedBufferAttribute(this.splashAlphas, 1)),
     );
-    this.splashGeometry.setAttribute(
-      'instancePhase',
-      setDynamicUsage(new InstancedBufferAttribute(this.splashPhases, 1)),
-    );
 
     this.rainMesh.frustumCulled = false;
+    this.rainMesh.matrixAutoUpdate = false;
+    this.rainMesh.updateMatrix();
     this.rainMesh.visible = false;
     this.splashMesh.frustumCulled = false;
+    this.splashMesh.matrixAutoUpdate = false;
+    this.splashMesh.updateMatrix();
     this.splashMesh.visible = false;
     this.group.add(this.rainMesh, this.splashMesh);
   }
@@ -489,6 +493,7 @@ export class RainField {
       this.clearVisibleRain();
       return;
     }
+    this.group.visible = true;
 
     camera.updateMatrixWorld();
     this.frustumMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
@@ -500,15 +505,37 @@ export class RainField {
     const cameraBlockX = Math.floor(cameraX);
     const cameraBlockY = Math.floor(cameraY);
     const cameraBlockZ = Math.floor(cameraZ);
-    const centerChunk = worldToChunkCoord(cameraBlockX, cameraBlockZ);
-    const chunkRadius = Math.ceil(RAIN_RENDER_RADIUS / WORLD_CONFIG.chunkSizeX) + 1;
+    const renderRadius = Math.round(lerp(RAIN_MIN_RENDER_RADIUS, RAIN_MAX_RENDER_RADIUS, intensity));
+    const renderRadiusSq = (renderRadius + 0.5) * (renderRadius + 0.5);
 
     let rainCount = 0;
     let splashCount = 0;
 
-    for (let chunkZ = centerChunk.z - chunkRadius; chunkZ <= centerChunk.z + chunkRadius; chunkZ += 1) {
-      for (let chunkX = centerChunk.x - chunkRadius; chunkX <= centerChunk.x + chunkRadius; chunkX += 1) {
-        const chunkKey = toChunkKey({ x: chunkX, z: chunkZ });
+    for (let offsetZ = -renderRadius; offsetZ <= renderRadius; offsetZ += 1) {
+      for (let offsetX = -renderRadius; offsetX <= renderRadius; offsetX += 1) {
+        const distanceSq = offsetX * offsetX + offsetZ * offsetZ;
+        if (distanceSq > renderRadiusSq) {
+          continue;
+        }
+
+        const worldX = cameraBlockX + offsetX;
+        const worldZ = cameraBlockZ + offsetZ;
+        if (
+          !shouldRenderRainColumn(
+            this.frustum,
+            cameraX,
+            cameraZ,
+            worldX,
+            worldZ,
+            RAIN_COLUMN_HALF_WIDTH,
+            renderRadius,
+          )
+        ) {
+          continue;
+        }
+
+        const chunkCoord = worldToChunkCoord(worldX, worldZ);
+        const chunkKey = toChunkKey(chunkCoord);
         const chunk = world.getChunkByKey(chunkKey);
         if (!chunk) {
           continue;
@@ -522,84 +549,75 @@ export class RainField {
         cached.lastSeenFrame = this.frameId;
         this.chunkCaches.set(chunkKey, cached);
 
-        for (const column of cached.columns) {
-          if (
-            !shouldRenderRainColumn(
-              this.frustum,
-              cameraX,
-              cameraZ,
-              column.worldX,
-              column.worldZ,
-              RAIN_COLUMN_HALF_WIDTH,
-              RAIN_RENDER_RADIUS,
-            )
-          ) {
-            continue;
-          }
+        const localX = toLocalCoord(worldX);
+        const localZ = toLocalCoord(worldZ);
+        const column = cached.columns[localX + localZ * WORLD_CONFIG.chunkSizeX];
+        if (!column) {
+          continue;
+        }
 
-          const precipitationY = Math.max(0, column.blockingY + 1);
-          const visibleBottom = Math.max(cameraBlockY - RAIN_VERTICAL_RANGE, precipitationY);
-          const visibleTop = Math.max(cameraBlockY + RAIN_VERTICAL_RANGE, precipitationY);
-          const rainHeight = visibleTop - visibleBottom;
+        const precipitationY = Math.max(0, column.blockingY + 1);
+        const visibleBottom = Math.max(cameraBlockY - RAIN_VERTICAL_RANGE, precipitationY);
+        const visibleTop = Math.max(cameraBlockY + RAIN_VERTICAL_RANGE, precipitationY);
+        const rainHeight = visibleTop - visibleBottom;
 
-          if (rainHeight <= 0) {
-            continue;
-          }
+        if (rainHeight <= 0) {
+          continue;
+        }
 
-          const directionIndexX = column.worldX - cameraBlockX + RAIN_GRID_CENTER;
-          const directionIndexZ = column.worldZ - cameraBlockZ + RAIN_GRID_CENTER;
-          if (
-            directionIndexX < 0 ||
-            directionIndexX >= RAIN_GRID_SIZE ||
-            directionIndexZ < 0 ||
-            directionIndexZ >= RAIN_GRID_SIZE
-          ) {
-            continue;
-          }
+        const directionIndex = ((offsetZ + RAIN_GRID_CENTER) << 5) | (offsetX + RAIN_GRID_CENTER);
+        const rainWidthX = RAIN_DIRECTION_X[directionIndex] ?? 0;
+        const rainWidthZ = RAIN_DIRECTION_Z[directionIndex] ?? RAIN_COLUMN_HALF_WIDTH;
+        const distanceAlpha = (1 - clamp01(distanceSq / renderRadiusSq)) * 0.45 + 0.55;
+        const rainAlpha = intensity * distanceAlpha * column.variation.alphaJitter;
 
-          const directionIndex = (directionIndexZ << 5) | directionIndexX;
-          const rainWidthX = RAIN_DIRECTION_X[directionIndex] ?? 0;
-          const rainWidthZ = RAIN_DIRECTION_Z[directionIndex] ?? RAIN_COLUMN_HALF_WIDTH;
-          const distance = Math.hypot(column.worldX + 0.5 - cameraX, column.worldZ + 0.5 - cameraZ);
-          const distanceAlpha = (1 - clamp01(distance / RAIN_RENDER_RADIUS) ** 2) * 0.5 + 0.5;
-          const rainAlpha = intensity * distanceAlpha * column.variation.alphaJitter;
+        if (rainAlpha <= 0.015) {
+          continue;
+        }
 
-          if (rainAlpha <= 0.015) {
-            continue;
-          }
+        if (rainCount < RAIN_MAX_INSTANCES) {
+          const rainCenterIndex = rainCount * 3;
+          const rainWidthIndex = rainCount * 2;
+          this.rainCenters[rainCenterIndex] = worldX + 0.5;
+          this.rainCenters[rainCenterIndex + 1] = visibleBottom;
+          this.rainCenters[rainCenterIndex + 2] = worldZ + 0.5;
+          this.rainWidthDirs[rainWidthIndex] = rainWidthX;
+          this.rainWidthDirs[rainWidthIndex + 1] = rainWidthZ;
+          this.rainHeights[rainCount] = rainHeight;
+          this.rainVScales[rainCount] = rainHeight * RAIN_UV_SCALE_PER_BLOCK;
+          this.rainVOffsets[rainCount] =
+            visibleBottom * RAIN_UV_SCALE_PER_BLOCK +
+            column.variation.scrollOffset +
+            this.elapsedSeconds * column.variation.scrollSpeed;
+          this.rainAlphas[rainCount] = rainAlpha;
+          rainCount += 1;
+        }
 
-          if (rainCount < RAIN_MAX_INSTANCES) {
-            const rainCenterIndex = rainCount * 3;
-            const rainWidthIndex = rainCount * 2;
-            this.rainCenters[rainCenterIndex] = column.worldX + 0.5;
-            this.rainCenters[rainCenterIndex + 1] = visibleBottom;
-            this.rainCenters[rainCenterIndex + 2] = column.worldZ + 0.5;
-            this.rainWidthDirs[rainWidthIndex] = rainWidthX;
-            this.rainWidthDirs[rainWidthIndex + 1] = rainWidthZ;
-            this.rainHeights[rainCount] = rainHeight;
-            this.rainVScales[rainCount] = rainHeight * RAIN_UV_SCALE_PER_BLOCK;
-            this.rainVOffsets[rainCount] =
-              visibleBottom * RAIN_UV_SCALE_PER_BLOCK +
-              column.variation.scrollOffset +
-              this.elapsedSeconds * column.variation.scrollSpeed;
-            this.rainAlphas[rainCount] = rainAlpha;
-            rainCount += 1;
-          }
+        const splashWithinView =
+          precipitationY >= cameraY - RAIN_VERTICAL_RANGE - 1 &&
+          precipitationY <= cameraY + RAIN_VERTICAL_RANGE + 2;
+        if (!splashWithinView) {
+          continue;
+        }
 
-          const splashWithinView =
-            precipitationY >= cameraY - RAIN_VERTICAL_RANGE - 1 &&
-            precipitationY <= cameraY + RAIN_VERTICAL_RANGE + 2;
-          if (!splashWithinView || splashCount >= RAIN_MAX_INSTANCES) {
-            continue;
-          }
-
+        for (
+          let splashVariant = 0;
+          splashVariant < SPLASHES_PER_COLUMN && splashCount < SPLASH_MAX_INSTANCES;
+          splashVariant += 1
+        ) {
+          const splashSeed = hash32(
+            column.variation.splashSeed ^ Math.imul(splashVariant + 1, 0x9e3779b9),
+          );
           const splashIndex = splashCount * 3;
-          this.splashCenters[splashIndex] = column.worldX + 0.5;
+          this.splashCenters[splashIndex] =
+            worldX + 0.5 + (toUnitFloat(splashSeed, 0) - 0.5) * SPLASH_SPREAD;
           this.splashCenters[splashIndex + 1] = precipitationY + SPLASH_HEIGHT_OFFSET;
-          this.splashCenters[splashIndex + 2] = column.worldZ + 0.5;
-          this.splashSizes[splashCount] = SPLASH_BASE_SIZE * column.variation.splashSize;
-          this.splashAlphas[splashCount] = rainAlpha;
-          this.splashPhases[splashCount] = column.variation.splashPhase + this.elapsedSeconds * 22;
+          this.splashCenters[splashIndex + 2] =
+            worldZ + 0.5 + (toUnitFloat(splashSeed, 8) - 0.5) * SPLASH_SPREAD;
+          this.splashSizes[splashCount] =
+            SPLASH_BASE_SIZE * lerp(0.72, 1.16, toUnitFloat(splashSeed, 16));
+          this.splashAlphas[splashCount] =
+            rainAlpha * lerp(0.42, 0.72, toUnitFloat(splashSeed, 24));
           splashCount += 1;
         }
       }
@@ -610,15 +628,20 @@ export class RainField {
   }
 
   private clearVisibleRain(): void {
+    this.group.visible = false;
     this.rainGeometry.instanceCount = 0;
     this.rainMesh.visible = false;
     this.splashGeometry.instanceCount = 0;
     this.splashMesh.visible = false;
     this.rainMaterial.uniforms.uOpacity.value = 0;
     this.splashMaterial.uniforms.uOpacity.value = 0;
+    if (this.chunkCaches.size > 0) {
+      this.chunkCaches.clear();
+    }
   }
 
   private commitInstanceData(rainCount: number, splashCount: number, intensity: number): void {
+    this.group.visible = rainCount > 0 || splashCount > 0;
     this.rainGeometry.instanceCount = rainCount;
     this.rainMesh.visible = rainCount > 0;
     this.splashGeometry.instanceCount = splashCount;
@@ -653,9 +676,6 @@ export class RainField {
     ).needsUpdate = splashCount > 0;
     (
       this.splashGeometry.getAttribute('instanceAlpha') as InstancedBufferAttribute
-    ).needsUpdate = splashCount > 0;
-    (
-      this.splashGeometry.getAttribute('instancePhase') as InstancedBufferAttribute
     ).needsUpdate = splashCount > 0;
   }
 
