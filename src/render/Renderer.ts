@@ -26,6 +26,7 @@ import type { WeatherVisualState } from '../types/weather';
 import type { VoxelHit } from '../types/world';
 import { createDefaultWeatherVisualState } from '../world/Weather';
 import { getBlockDefinition } from '../world/BlockRegistry';
+import type { World } from '../world/World';
 import { RainField } from './RainField';
 import { SUN_DIRECTION, addSceneLights, type SceneLights, updateSunForCamera } from './SceneLights';
 import { createFirstPersonHand, disposeModel, loadSkinTexture } from './SkinModel';
@@ -440,9 +441,10 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
   updateWeatherEffects(
     dt: number,
     cameraPosition: { x: number; y: number; z: number },
+    world: World,
   ): void {
     this.clouds.update(cameraPosition.x, cameraPosition.y, cameraPosition.z);
-    this.rain.update(dt, cameraPosition.x, cameraPosition.y, cameraPosition.z);
+    this.rain.update(dt, this.camera, world);
   }
 
   upsertChunkMesh(

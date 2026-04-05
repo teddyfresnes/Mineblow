@@ -922,7 +922,7 @@ export class Game {
       this.updateDroppedItems(dt);
     }
 
-    this.renderer.updateWeatherEffects(dt, player.getCameraPosition());
+    this.renderer.updateWeatherEffects(dt, player.getCameraPosition(), world);
     this.renderer.updateAnimatedTextures(dt);
     this.renderer.updateTransientEffects(dt);
 
