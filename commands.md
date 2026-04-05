@@ -56,7 +56,7 @@ Formats actuels:
 - `/time clock <0-24>`
 - `/time nextday`
 - `/time moon <1-8>`
-- `/weather <clear|cloudy_light|cloudy_heavy|overcast|rain_light|rain_heavy|storm>`
+- `/weather <clear|cloudy_light|cloudy_heavy|overcast|rain|rain_light|rain_heavy|storm>`
 - `/weather auto`
 - `/weather setClouds <0-100|0-1|auto>`
 - `/weather setRain <0-100|0-1|auto>`
@@ -73,6 +73,7 @@ Presets:
 - `cloudy_light`
 - `cloudy_heavy`
 - `overcast`
+- `rain`
 - `rain_light`
 - `rain_heavy`
 - `storm`
@@ -81,6 +82,7 @@ Exemples:
 
 - `/weather clear`
 - `/weather cloudy_light`
+- `/weather rain`
 - `/weather rain_heavy`
 - `/weather storm`
 

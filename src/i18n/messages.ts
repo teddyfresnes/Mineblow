@@ -119,7 +119,7 @@ const fr = {
     timeMoonUsage: 'Usage: /time moon <1-8> (voir commands.md)',
     timeMoonSuccess: 'Phase de lune reglee sur {phase}',
     weatherUsage:
-      'Usage: /weather <clear|cloudy_light|cloudy_heavy|overcast|rain_light|rain_heavy|storm> | auto | setClouds <0-100|0-1|auto> | setRain <0-100|0-1|auto> | setSky <auto|blue|soft|gray|storm> | debug',
+      'Usage: /weather <clear|cloudy_light|cloudy_heavy|overcast|rain|rain_light|rain_heavy|storm> | auto | setClouds <0-100|0-1|auto> | setRain <0-100|0-1|auto> | setSky <auto|blue|soft|gray|storm> | debug',
     weatherAutoUsage: 'Usage: /weather auto',
     weatherAutoSuccess: 'Meteo automatique reactivee',
     weatherPresetSuccess: 'Meteo forcee sur {preset}',
@@ -348,7 +348,7 @@ const en: MessageCatalog = {
     timeMoonUsage: 'Usage: /time moon <1-8> (see commands.md)',
     timeMoonSuccess: 'Moon phase set to {phase}',
     weatherUsage:
-      'Usage: /weather <clear|cloudy_light|cloudy_heavy|overcast|rain_light|rain_heavy|storm> | auto | setClouds <0-100|0-1|auto> | setRain <0-100|0-1|auto> | setSky <auto|blue|soft|gray|storm> | debug',
+      'Usage: /weather <clear|cloudy_light|cloudy_heavy|overcast|rain|rain_light|rain_heavy|storm> | auto | setClouds <0-100|0-1|auto> | setRain <0-100|0-1|auto> | setSky <auto|blue|soft|gray|storm> | debug',
     weatherAutoUsage: 'Usage: /weather auto',
     weatherAutoSuccess: 'Automatic weather resumed',
     weatherPresetSuccess: 'Weather forced to {preset}',

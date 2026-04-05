@@ -11,7 +11,8 @@ describe('Weather', () => {
     expect(pickNextWeatherPreset('clear', () => 0.05)).toBe('clear');
     expect(pickNextWeatherPreset('overcast', () => 0.1)).toBe('cloudy_heavy');
     expect(pickNextWeatherPreset('overcast', () => 0.5)).toBe('overcast');
-    expect(pickNextWeatherPreset('overcast', () => 0.9)).toBe('rain_light');
+    expect(pickNextWeatherPreset('overcast', () => 0.9)).toBe('rain');
+    expect(pickNextWeatherPreset('rain', () => 0.9)).toBe('rain_light');
     expect(pickNextWeatherPreset('storm', () => 0.95)).toBe('storm');
   });
 
@@ -39,5 +40,17 @@ describe('Weather', () => {
     );
     expect(visual.windOffsetX).toBe(12);
     expect(visual.windOffsetZ).toBe(-4);
+  });
+
+  it('keeps rain presets ordered from drizzle to storm', () => {
+    expect(getWeatherProfile('rain').rainIntensity).toBeLessThan(
+      getWeatherProfile('rain_light').rainIntensity,
+    );
+    expect(getWeatherProfile('rain_light').rainIntensity).toBeLessThan(
+      getWeatherProfile('rain_heavy').rainIntensity,
+    );
+    expect(getWeatherProfile('rain_heavy').rainIntensity).toBeLessThan(
+      getWeatherProfile('storm').rainIntensity,
+    );
   });
 });

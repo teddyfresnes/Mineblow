@@ -132,6 +132,7 @@ export class VoxelCloudLayer {
       const mesh = new InstancedMesh(this.geometry, material, MAX_BOXES_PER_PATCH);
       mesh.count = 0;
       mesh.frustumCulled = false;
+      mesh.renderOrder = 2;
       this.group.add(mesh);
       this.patches.push({
         mesh,

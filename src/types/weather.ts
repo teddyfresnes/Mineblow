@@ -3,6 +3,7 @@ export const WEATHER_PRESET_CHAIN = [
   'cloudy_light',
   'cloudy_heavy',
   'overcast',
+  'rain',
   'rain_light',
   'rain_heavy',
   'storm',
