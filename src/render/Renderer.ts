@@ -717,6 +717,7 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
       (this.baseSkyBounceIntensity * lerp(0.14, 1, daylight) + twilight * 0.05) *
       lerp(1, 0.68, ambientDimming);
     this.airSunIntensity = this.baseSunIntensity * directSun * sunVisibility;
+    this.rain.setDaylight(clamp01(daylight * 0.35 + directSun * 0.65));
 
     this.sky.setCelestialState({
       topColor: this.skyTopColor,
