@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { WORLD_CONFIG } from '../game/Config';
 import { World } from './World';
 
@@ -38,6 +38,21 @@ describe('World diffs', () => {
     } finally {
       world.dispose();
       config.preloadRadius = previousPreloadRadius;
+    }
+  });
+
+  it('does not rebuild chunk streaming when staying inside the same chunk', () => {
+    const world = new World('streaming-cache');
+
+    try {
+      const dropStaleSpy = vi.spyOn(world as any, 'dropStaleCompletedChunks');
+
+      world.enqueueStreamingAround(0.2, 0.2);
+      world.enqueueStreamingAround(0.8, 0.8);
+
+      expect(dropStaleSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      world.dispose();
     }
   });
 });

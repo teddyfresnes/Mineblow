@@ -102,6 +102,11 @@ export interface RainChunkCache {
   lastSeenFrame: number;
 }
 
+interface AsyncTextureState {
+  readonly texture: Texture;
+  readonly ready: { value: boolean };
+}
+
 const hash32 = (value: number): number => {
   let hashed = value | 0;
   hashed = Math.imul(hashed ^ (hashed >>> 16), 0x7feb352d);
@@ -118,14 +123,20 @@ const toLocalCoord = (value: number): number =>
 const isPrecipitationBlockingBlock = (blockId: BlockId): boolean =>
   blockId !== 0 && (isSolidBlock(blockId) || isWaterBlock(blockId));
 
-const createRainTexture = (): Texture => {
-  const texture = WEATHER_TEXTURE_LOADER.load(RAIN_TEXTURE_URL);
+const createRainTexture = (): AsyncTextureState => {
+  const ready = { value: typeof window === 'undefined' };
+  const texture = WEATHER_TEXTURE_LOADER.load(
+    RAIN_TEXTURE_URL,
+    () => {
+      ready.value = true;
+    },
+  );
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
   texture.magFilter = NearestFilter;
   texture.minFilter = NearestFilter;
   texture.generateMipmaps = false;
-  return texture;
+  return { texture, ready };
 };
 
 const createVerticalQuadGeometry = (): InstancedBufferGeometry => {
@@ -424,7 +435,8 @@ export class RainField {
 
   private readonly rainGeometry = createVerticalQuadGeometry();
   private readonly splashGeometry = createSplashGeometry();
-  private readonly rainMaterial = createRainMaterial(createRainTexture());
+  private readonly rainTextureState = createRainTexture();
+  private readonly rainMaterial = createRainMaterial(this.rainTextureState.texture);
   private readonly splashMaterial = createSplashMaterial();
   private readonly rainMesh = new Mesh(this.rainGeometry, this.rainMaterial);
   private readonly splashMesh = new Mesh(this.splashGeometry, this.splashMaterial);
@@ -685,11 +697,12 @@ export class RainField {
   }
 
   private commitInstanceData(rainCount: number, splashCount: number, intensity: number): void {
-    this.group.visible = rainCount > 0 || splashCount > 0;
-    this.rainGeometry.instanceCount = rainCount;
-    this.rainMesh.visible = rainCount > 0;
-    this.splashGeometry.instanceCount = splashCount;
-    this.splashMesh.visible = splashCount > 0;
+    const rainTextureReady = this.rainTextureState.ready.value;
+    this.group.visible = rainTextureReady && (rainCount > 0 || splashCount > 0);
+    this.rainGeometry.instanceCount = rainTextureReady ? rainCount : 0;
+    this.rainMesh.visible = rainTextureReady && rainCount > 0;
+    this.splashGeometry.instanceCount = rainTextureReady ? splashCount : 0;
+    this.splashMesh.visible = rainTextureReady && splashCount > 0;
     const splashDayBoost = clamp01(
       clamp01(this.daylight) * lerp(0.92, 1.04, clamp01(this.weather.skyBrightness)),
     );
@@ -711,31 +724,31 @@ export class RainField {
 
     (
       this.rainGeometry.getAttribute('instanceCenter') as InstancedBufferAttribute
-    ).needsUpdate = rainCount > 0;
+    ).needsUpdate = rainTextureReady && rainCount > 0;
     (
       this.rainGeometry.getAttribute('instanceWidthDir') as InstancedBufferAttribute
-    ).needsUpdate = rainCount > 0;
+    ).needsUpdate = rainTextureReady && rainCount > 0;
     (
       this.rainGeometry.getAttribute('instanceHeight') as InstancedBufferAttribute
-    ).needsUpdate = rainCount > 0;
+    ).needsUpdate = rainTextureReady && rainCount > 0;
     (
       this.rainGeometry.getAttribute('instanceVScale') as InstancedBufferAttribute
-    ).needsUpdate = rainCount > 0;
+    ).needsUpdate = rainTextureReady && rainCount > 0;
     (
       this.rainGeometry.getAttribute('instanceVOffset') as InstancedBufferAttribute
-    ).needsUpdate = rainCount > 0;
+    ).needsUpdate = rainTextureReady && rainCount > 0;
     (
       this.rainGeometry.getAttribute('instanceAlpha') as InstancedBufferAttribute
-    ).needsUpdate = rainCount > 0;
+    ).needsUpdate = rainTextureReady && rainCount > 0;
     (
       this.splashGeometry.getAttribute('instanceCenter') as InstancedBufferAttribute
-    ).needsUpdate = splashCount > 0;
+    ).needsUpdate = rainTextureReady && splashCount > 0;
     (
       this.splashGeometry.getAttribute('instanceSize') as InstancedBufferAttribute
-    ).needsUpdate = splashCount > 0;
+    ).needsUpdate = rainTextureReady && splashCount > 0;
     (
       this.splashGeometry.getAttribute('instanceAlpha') as InstancedBufferAttribute
-    ).needsUpdate = splashCount > 0;
+    ).needsUpdate = rainTextureReady && splashCount > 0;
   }
 
   private pruneChunkCaches(): void {

@@ -78,6 +78,7 @@ export class World {
   private fluidCurrentTick = 0;
   private fluidMinScheduledTick: number | null = null;
   private fluidTickAccumulator = 0;
+  private lastStreamingSignature: string | null = null;
 
   constructor(readonly seed: string, persistedDiffs?: Map<string, ChunkDiffRecord>) {
     this.generator = new TerrainGenerator(seed);
@@ -122,6 +123,7 @@ export class World {
     this.fluidCurrentTick = 0;
     this.fluidMinScheduledTick = null;
     this.fluidTickAccumulator = 0;
+    this.lastStreamingSignature = null;
   }
 
   getPlayerChunkCoord(x: number, z: number): ChunkCoord {
@@ -130,10 +132,16 @@ export class World {
 
   enqueueStreamingAround(worldX: number, worldZ: number): void {
     const center = this.getPlayerChunkCoord(worldX, worldZ);
+    const unloadRadius = WORLD_CONFIG.preloadRadius + WORLD_CONFIG.unloadRadiusBuffer;
+    const streamingSignature = `${center.x},${center.z}:${WORLD_CONFIG.preloadRadius}:${unloadRadius}`;
+    if (streamingSignature === this.lastStreamingSignature) {
+      return;
+    }
+    this.lastStreamingSignature = streamingSignature;
+
     const desired = new Set<string>();
     const retainedLoaded = new Set<string>();
     const candidates: Array<{ coord: ChunkCoord; distance: number }> = [];
-    const unloadRadius = WORLD_CONFIG.preloadRadius + WORLD_CONFIG.unloadRadiusBuffer;
 
     for (
       let chunkX = center.x - WORLD_CONFIG.preloadRadius;
