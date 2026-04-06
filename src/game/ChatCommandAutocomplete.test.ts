@@ -12,6 +12,11 @@ describe('autocompleteChatCommand', () => {
     expect(result?.selectionStart).toBe('/weather '.length);
   });
 
+  it('completes new top-level utility commands', () => {
+    expect(autocompleteChatCommand('/se', 3)?.value).toBe('/seed ');
+    expect(autocompleteChatCommand('/te', 3)?.value).toBe('/temperature ');
+  });
+
   it('extends to the shared prefix before cycling ambiguous weather presets', () => {
     const result = autocompleteChatCommand('/weather ra', '/weather ra'.length);
 

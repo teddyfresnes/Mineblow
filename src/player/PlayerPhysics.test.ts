@@ -125,4 +125,31 @@ describe('PlayerPhysics', () => {
     expect(grounded).toBe(true);
     expect(position[1]).toBeCloseTo(91.5, 4);
   });
+
+  it('steps up onto snow layers up to 0.6 block high without needing a jump', () => {
+    const world = new World('physics-snow-step-up');
+    world.primeAround(0, 0, 0);
+
+    for (let x = 0; x <= 15; x += 1) {
+      for (let z = 0; z <= 15; z += 1) {
+        world.setBlock(x, 90, z, 3);
+        for (let y = 91; y < 96; y += 1) {
+          world.setBlock(x, y, z, 0);
+        }
+      }
+    }
+    world.setBlock(5, 91, 4, toSnowCoverBlockId(4));
+
+    let position: [number, number, number] = [4.2, 91, 4.5];
+    let velocity: [number, number, number] = [2.4, 0, 0];
+
+    for (let step = 0; step < 20; step += 1) {
+      const result = PlayerPhysics.simulate(world, position, velocity, 1 / 60);
+      position = result.position;
+      velocity = [2.4, 0, 0];
+    }
+
+    expect(position[0]).toBeGreaterThan(5);
+    expect(position[1]).toBeCloseTo(91.5, 4);
+  });
 });

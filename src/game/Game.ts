@@ -113,6 +113,8 @@ const WORLD_PREVIEW_SIZE = 256;
 const DROP_PICKUP_DELAY_MS = 2000;
 const PAUSE_MENU_KEY = 'KeyP';
 const CHUNK_MESH_SYNC_BUDGET_MS = 2;
+const CHUNK_MESH_PRELOAD_SYNC_BUDGET_MS = 14;
+const WORLD_PRELOAD_GENERATION_BUDGET = 8;
 const UNDERWATER_SURFACE_SCAN_MAX_BLOCKS = 160;
 const ITEM_WATER_FLOW_ACCELERATION = 4.25;
 const ITEM_WATER_OUTFLOW_ACCELERATION = 2.1;
@@ -121,6 +123,8 @@ const DAY_NIGHT_CYCLE_SECONDS = 20 * 60;
 const MOON_PHASE_COUNT = 8;
 const CHAT_COMMAND_TIME = 'time';
 const CHAT_COMMAND_WEATHER = 'weather';
+const CHAT_COMMAND_SEED = 'seed';
+const CHAT_COMMAND_TEMPERATURE = 'temperature';
 const CHAT_SUBCOMMAND_CLOCK = 'clock';
 const CHAT_SUBCOMMAND_NEXTDAY = 'nextday';
 const CHAT_SUBCOMMAND_MOON = 'moon';
@@ -147,6 +151,9 @@ export class Game {
   private readonly worldLoadingCard = document.createElement('div');
   private readonly worldLoadingSpinner = document.createElement('div');
   private readonly worldLoadingLabel = document.createElement('div');
+  private readonly worldLoadingStatus = document.createElement('div');
+  private readonly worldLoadingProgress = document.createElement('div');
+  private readonly worldLoadingProgressFill = document.createElement('div');
   private readonly renderer: Renderer;
   private readonly input: InputController;
   private readonly menu: StartMenu;
@@ -221,7 +228,16 @@ export class Game {
     this.worldLoadingSpinner.className = 'world-loading-spinner';
     this.worldLoadingSpinner.setAttribute('aria-hidden', 'true');
     this.worldLoadingLabel.className = 'world-loading-label';
-    this.worldLoadingCard.append(this.worldLoadingSpinner, this.worldLoadingLabel);
+    this.worldLoadingStatus.className = 'world-loading-status';
+    this.worldLoadingProgress.className = 'world-loading-progress';
+    this.worldLoadingProgressFill.className = 'world-loading-progress-fill';
+    this.worldLoadingProgress.append(this.worldLoadingProgressFill);
+    this.worldLoadingCard.append(
+      this.worldLoadingSpinner,
+      this.worldLoadingLabel,
+      this.worldLoadingStatus,
+      this.worldLoadingProgress,
+    );
     this.worldLoadingOverlay.append(this.worldLoadingCard);
     this.shell.append(this.canvas);
     const entryGateBody = document.createElement('div');
@@ -391,6 +407,7 @@ export class Game {
 
   private showWorldLoadingOverlay(): void {
     this.updateWorldLoadingLabel();
+    this.setWorldLoadingProgress(0);
     this.worldLoadingOverlay.classList.add('active');
     this.worldLoadingOverlay.setAttribute('aria-hidden', 'false');
   }
@@ -402,6 +419,45 @@ export class Game {
 
   private updateWorldLoadingLabel(): void {
     this.worldLoadingLabel.textContent = translate('menu.loadingWorld', {}, this.settings.language);
+    if (!this.worldLoadingStatus.textContent) {
+      this.worldLoadingStatus.textContent = '0%';
+    }
+  }
+
+  private setWorldLoadingProgress(progress: number, detail?: string): void {
+    const clamped = Math.max(0, Math.min(1, progress));
+    this.worldLoadingProgressFill.style.transform = `scaleX(${clamped})`;
+    this.worldLoadingStatus.textContent =
+      detail ?? `${Math.max(0, Math.min(100, Math.round(clamped * 100)))}%`;
+  }
+
+  private updateWorldLoadingProgress(world: World): void {
+    const desired = world.getDesiredChunkCount();
+    const loaded = world.getLoadedDesiredChunkCount();
+    const progress = world.getStreamingProgress();
+    const detail =
+      desired > 0
+        ? `${loaded}/${desired} · ${Math.max(0, Math.min(100, Math.round(progress * 100)))}%`
+        : `${Math.max(0, Math.min(100, Math.round(progress * 100)))}%`;
+    this.setWorldLoadingProgress(progress, detail);
+  }
+
+  private async preloadSessionWorld(session: Session): Promise<void> {
+    const [playerX, , playerZ] = session.player.getPosition();
+    const world = session.world;
+    world.enqueueStreamingAround(playerX, playerZ);
+    this.updateWorldLoadingProgress(world);
+    await this.waitForNextPaint();
+
+    while (!world.isDesiredRegionReady()) {
+      world.processGenerationBudget(WORLD_PRELOAD_GENERATION_BUDGET);
+      this.syncChunkMeshes(CHUNK_MESH_PRELOAD_SYNC_BUDGET_MS);
+      this.updateWorldLoadingProgress(world);
+      await this.waitForNextPaint();
+    }
+
+    this.syncChunkMeshes(CHUNK_MESH_PRELOAD_SYNC_BUDGET_MS);
+    this.setWorldLoadingProgress(1, `${world.getDesiredChunkCount()}/${world.getDesiredChunkCount()} · 100%`);
   }
 
   private async waitForNextPaint(): Promise<void> {
@@ -539,7 +595,6 @@ export class Game {
     this.renderer.clearChunks();
 
     const world = new World(seed);
-    world.primeAround(0, 0, 1);
     const spawnPoint = SpawnResolver.resolve(world);
     const playerState: PlayerState = {
       position: [...spawnPoint],
@@ -592,9 +647,11 @@ export class Game {
     loaded: LoadedWorld,
     openPauseOnPointerLockFailure = true,
   ): Promise<void> {
-    const world = new World(loaded.save.seed, loaded.chunkDiffs);
-    world.primeAround(loaded.save.player.position[0], loaded.save.player.position[2], 1);
-    world.primeAround(0, 0, 1);
+    const world = new World(
+      loaded.save.seed,
+      loaded.chunkDiffs,
+      normalizeEnvironmentState(loaded.save.environment).surfaceWeather,
+    );
     const playerState = this.createSafePlayerState(loaded.save.player, world);
     const inventory = new Inventory(loaded.save.inventory, playerState.selectedSlot);
     const worldStats = this.normalizeWorldStats(loaded.save.worldStats);
@@ -649,9 +706,7 @@ export class Game {
     this.hud.setHealth(20, 20);
     this.updateLevelHud();
 
-    const [playerX, , playerZ] = session.player.getPosition();
-    session.world.enqueueStreamingAround(playerX, playerZ);
-    this.syncChunkMeshes();
+    await this.preloadSessionWorld(session);
     this.hud.setInventoryOverlayActive(false);
     this.hud.setVisible(true);
     this.hud.setHandSkin(this.settings.skinDataUrl);
@@ -1084,6 +1139,12 @@ export class Game {
       case CHAT_COMMAND_WEATHER:
         this.executeWeatherCommand(args);
         return;
+      case CHAT_COMMAND_SEED:
+        this.executeSeedCommand(args);
+        return;
+      case CHAT_COMMAND_TEMPERATURE:
+        this.executeTemperatureCommand(args);
+        return;
       default:
         this.chat.addSystemMessage(
           translate('hud.unknownCommand', {}, this.settings.language),
@@ -1293,6 +1354,44 @@ export class Game {
       return 'invalid';
     }
     return percentageNormalized;
+  }
+
+  private executeSeedCommand(args: string[]): void {
+    if (args.length !== 0) {
+      this.chat.addSystemMessage(translate('hud.seedUsage', {}, this.settings.language), 'error');
+      return;
+    }
+    if (!this.session) {
+      return;
+    }
+
+    this.chat.addSystemMessage(
+      translate('hud.seedValue', { seed: this.session.seed }, this.settings.language),
+    );
+  }
+
+  private executeTemperatureCommand(args: string[]): void {
+    if (args.length !== 0) {
+      this.chat.addSystemMessage(
+        translate('hud.temperatureUsage', {}, this.settings.language),
+        'error',
+      );
+      return;
+    }
+
+    const temperatureCelsius = this.weatherController.getWeatherState().temperatureCelsius;
+    this.chat.addSystemMessage(
+      translate(
+        'hud.temperatureValue',
+        { temperature: `${this.formatTemperatureCelsius(temperatureCelsius)} C` },
+        this.settings.language,
+      ),
+    );
+  }
+
+  private formatTemperatureCelsius(value: number): string {
+    const rounded = Math.round(value * 10) / 10;
+    return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
   }
 
   private printWeatherDebugState(): void {
@@ -1812,7 +1911,7 @@ export class Game {
     }
   }
 
-  private syncChunkMeshes(): void {
+  private syncChunkMeshes(timeBudgetMs = CHUNK_MESH_SYNC_BUDGET_MS): void {
     if (!this.session) {
       return;
     }
@@ -1823,7 +1922,7 @@ export class Game {
     }
 
     const startedAt = performance.now();
-    while (performance.now() - startedAt <= CHUNK_MESH_SYNC_BUDGET_MS) {
+    while (performance.now() - startedAt <= Math.max(0, timeBudgetMs)) {
       const [chunk] = world.drainMeshUpdates(1);
       if (!chunk) {
         break;
@@ -1933,7 +2032,7 @@ export class Game {
     const belowSolid = samplePoints.some(([sampleX, sampleZ]) => {
       const blockX = Math.floor(sampleX);
       const blockZ = Math.floor(sampleZ);
-      const blockId = world.getBlock(blockX, belowY, blockZ);
+      const blockId = world.getBlockOrGenerated(blockX, belowY, blockZ);
       if (!blocksMovement(blockId)) {
         return false;
       }
@@ -1948,7 +2047,10 @@ export class Game {
     return samplePoints.every(([sampleX, sampleZ]) => {
       const blockX = Math.floor(sampleX);
       const blockZ = Math.floor(sampleZ);
-      return world.getBlock(blockX, feetY, blockZ) === 0 && world.getBlock(blockX, headY, blockZ) === 0;
+      return (
+        world.getBlockOrGenerated(blockX, feetY, blockZ) === 0 &&
+        world.getBlockOrGenerated(blockX, headY, blockZ) === 0
+      );
     });
   }
 
@@ -2346,6 +2448,7 @@ export class Game {
       timeOfDay: this.timeOfDay,
       moonPhase: this.moonPhase,
       weather: this.weatherController.getWeatherState(),
+      surfaceWeather: this.session?.world.getSurfaceWeatherState(),
     };
   }
 

@@ -10,17 +10,15 @@ export const getAltitudeAdjustedTemperature = (
 export const getSignedPrecipitationTemperature = (
   baseTemperature: number,
   worldY: number,
-  temperatureOffset = 0,
+  temperatureCelsius = 0,
 ): number =>
   getAltitudeAdjustedTemperature(baseTemperature, worldY) -
   WORLDGEN_PROFILE.hydrology.freezeTemperature +
-  temperatureOffset;
+  temperatureCelsius;
 
 export const getLocalPrecipitationType = (
-  baseTemperature: number,
-  worldY: number,
-  temperatureOffset = 0,
+  temperatureCelsius: number,
 ): LocalPrecipitationType =>
-  getSignedPrecipitationTemperature(baseTemperature, worldY, temperatureOffset) < 0
+  temperatureCelsius < 0
     ? 'snow'
     : 'rain';

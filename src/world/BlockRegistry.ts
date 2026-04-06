@@ -7,6 +7,8 @@ interface InternalBlockDefinition extends BlockDefinition {
 }
 
 export const WATER_SOURCE_BLOCK_ID = 10 as const;
+export const SNOW_BLOCK_ID = 24 as const;
+export const ICE_BLOCK_ID = 25 as const;
 export const WATER_FLOW_LEVEL_MIN = 1 as const;
 export const WATER_FLOW_LEVEL_MAX = 7 as const;
 const WATER_FLOW_BLOCK_IDS = [26, 27, 28, 29, 30, 31, 32] as const;
@@ -673,10 +675,11 @@ export const isPlantBlock = (blockId: BlockId): boolean => getBlockDefinition(bl
 export const isSnowLayerBlock = (blockId: BlockId): boolean =>
   SNOW_LAYER_BLOCK_IDS.includes(blockId as (typeof SNOW_LAYER_BLOCK_IDS)[number]);
 
-export const isSnowCoverBlock = (blockId: BlockId): boolean => blockId === 24 || isSnowLayerBlock(blockId);
+export const isSnowCoverBlock = (blockId: BlockId): boolean =>
+  blockId === SNOW_BLOCK_ID || isSnowLayerBlock(blockId);
 
 export const getSnowCoverLevel = (blockId: BlockId): number | null => {
-  if (blockId === 24) {
+  if (blockId === SNOW_BLOCK_ID) {
     return 8;
   }
   if (!isSnowLayerBlock(blockId)) {
@@ -688,7 +691,7 @@ export const getSnowCoverLevel = (blockId: BlockId): number | null => {
 export const toSnowCoverBlockId = (level: number): BlockId => {
   const clamped = Math.max(1, Math.min(8, Math.floor(level)));
   if (clamped >= 8) {
-    return 24;
+    return SNOW_BLOCK_ID;
   }
   return SNOW_LAYER_BLOCK_IDS[clamped - 1] as BlockId;
 };

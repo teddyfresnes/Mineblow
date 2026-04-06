@@ -1,6 +1,6 @@
 import { WEATHER_PRESET_CHAIN, WEATHER_SKY_PRESET_OPTIONS } from '../types/weather';
 
-const ROOT_COMMANDS = ['time', 'weather'] as const;
+const ROOT_COMMANDS = ['time', 'weather', 'seed', 'temperature'] as const;
 const TIME_SUBCOMMANDS = ['clock', 'nextday', 'moon'] as const;
 const WEATHER_SUBCOMMANDS = [
   ...WEATHER_PRESET_CHAIN,

@@ -49,7 +49,7 @@ const TILE_TEXTURES: Record<string, string> = {
   diamond_ore: new URL('../../assets/textures/blocks/diamond_ore.png', import.meta.url).href,
   lapis_ore: new URL('../../assets/textures/blocks/lapis_ore.png', import.meta.url).href,
   snow: new URL('../../assets/textures/blocks/snow.png', import.meta.url).href,
-  ice: new URL('../../assets/textures/blocks/glass.png', import.meta.url).href,
+  ice: new URL('../../assets/textures/blocks/ice.png', import.meta.url).href,
 };
 
 const texturePromises = new Map<string, Promise<HTMLImageElement | null>>();

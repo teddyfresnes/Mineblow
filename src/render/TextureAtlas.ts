@@ -195,9 +195,8 @@ const BLOCK_TEXTURES: Record<TileKey, TileAssetDefinition> = {
   snow: {
     textureUrl: new URL('../../assets/textures/blocks/snow.png', import.meta.url).href,
   },
-  // b1.7.3 parity fallback: use glass when ice texture is missing from assets.
   ice: {
-    textureUrl: new URL('../../assets/textures/blocks/glass.png', import.meta.url).href,
+    textureUrl: new URL('../../assets/textures/blocks/ice.png', import.meta.url).href,
   },
 };
 

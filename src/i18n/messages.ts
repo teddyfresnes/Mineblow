@@ -118,6 +118,10 @@ const fr = {
     timeNextDaySuccess: 'Jour avance de 24h',
     timeMoonUsage: 'Usage: /time moon <1-8> (voir commands.md)',
     timeMoonSuccess: 'Phase de lune reglee sur {phase}',
+    seedUsage: 'Usage: /seed (voir commands.md)',
+    seedValue: 'Seed: {seed}',
+    temperatureUsage: 'Usage: /temperature (voir commands.md)',
+    temperatureValue: 'Temperature: {temperature}',
     weatherUsage:
       'Usage: /weather <clear|cloudy_light|cloudy_heavy|overcast|rain|rain_light|rain_heavy|snow|snow_heavy|storm> | auto | setClouds <0-100|0-1|auto> | setRain <0-100|0-1|auto> | setSky <auto|blue|soft|gray|storm> | debug',
     weatherAutoUsage: 'Usage: /weather auto',
@@ -354,6 +358,10 @@ const en: MessageCatalog = {
     timeNextDaySuccess: 'Advanced time by 24 hours',
     timeMoonUsage: 'Usage: /time moon <1-8> (see commands.md)',
     timeMoonSuccess: 'Moon phase set to {phase}',
+    seedUsage: 'Usage: /seed (see commands.md)',
+    seedValue: 'Seed: {seed}',
+    temperatureUsage: 'Usage: /temperature (see commands.md)',
+    temperatureValue: 'Temperature: {temperature}',
     weatherUsage:
       'Usage: /weather <clear|cloudy_light|cloudy_heavy|overcast|rain|rain_light|rain_heavy|snow|snow_heavy|storm> | auto | setClouds <0-100|0-1|auto> | setRain <0-100|0-1|auto> | setSky <auto|blue|soft|gray|storm> | debug',
     weatherAutoUsage: 'Usage: /weather auto',

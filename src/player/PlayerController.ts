@@ -497,7 +497,8 @@ export class PlayerController {
       const headBlockId = world.getBlock(worldX, headY, worldZ);
       const feetObstacle =
         blocksMovement(feetBlockId) &&
-        feetY + getBlockCollisionHeight(feetBlockId) > this.state.position[1] + 0.5;
+        feetY + getBlockCollisionHeight(feetBlockId) >
+          this.state.position[1] + PLAYER_CONFIG.autoStepHeight;
       if (
         feetObstacle ||
         blocksMovement(chestBlockId) ||

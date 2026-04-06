@@ -224,6 +224,9 @@ export class SaveRepository {
           chunkKey: record.chunkKey,
           revision: record.revision,
           changes: record.changes,
+          ...(typeof record.surfaceWeatherTick === 'number'
+            ? { surfaceWeatherTick: record.surfaceWeatherTick }
+            : {}),
         });
       }
     }
@@ -427,7 +430,9 @@ export class SaveRepository {
 
     for (const record of records) {
       const recordKey = this.getChunkRecordKey(worldId, record.chunkKey);
-      if (record.changes.length === 0) {
+      const hasSurfaceWeatherSync =
+        typeof record.surfaceWeatherTick === 'number' && Number.isFinite(record.surfaceWeatherTick);
+      if (record.changes.length === 0 && !hasSurfaceWeatherSync) {
         await store.delete(recordKey);
       } else {
         await store.put(
@@ -437,6 +442,7 @@ export class SaveRepository {
             chunkKey: record.chunkKey,
             revision: record.revision,
             changes: record.changes,
+            surfaceWeatherTick: record.surfaceWeatherTick,
           },
           recordKey,
         );

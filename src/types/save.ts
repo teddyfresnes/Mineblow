@@ -12,6 +12,7 @@ export interface ChunkDiffRecord {
   chunkKey: string;
   changes: ChunkDiffEntry[];
   revision: number;
+  surfaceWeatherTick?: number;
 }
 
 export interface StoredChunkDiffRecord extends ChunkDiffRecord {

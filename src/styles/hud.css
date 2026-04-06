@@ -2358,10 +2358,10 @@ body.pointer-cursor-hidden * {
   border: 2px solid rgba(255, 255, 255, 0.72);
   background: rgba(6, 10, 14, 0.74);
   color: #fff;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
   align-items: center;
-  justify-content: center;
-  gap: 14px;
+  gap: 10px 14px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -2378,6 +2378,31 @@ body.pointer-cursor-hidden * {
 .world-loading-label {
   font-size: 0.84rem;
   line-height: 1.2;
+}
+
+.world-loading-status {
+  grid-column: 2;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.world-loading-progress {
+  grid-column: 1 / -1;
+  width: min(420px, calc(100vw - 84px));
+  height: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.world-loading-progress-fill {
+  width: 100%;
+  height: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: linear-gradient(90deg, #8bd2ff, #f5fbff);
+  transition: transform 120ms linear;
 }
 
 .intro-splash-label {

@@ -25,7 +25,7 @@ import type { LocalPrecipitationType, WeatherVisualState } from '../types/weathe
 import { blocksMovement, getBlockCollisionHeight, isWaterBlock } from '../world/BlockRegistry';
 import type { Chunk } from '../world/Chunk';
 import { chunkOriginX, chunkOriginZ, toChunkKey, worldToChunkCoord } from '../world/ChunkCoord';
-import { getSignedPrecipitationTemperature } from '../world/Precipitation';
+import { getLocalPrecipitationType } from '../world/Precipitation';
 import { createDefaultWeatherVisualState } from '../world/Weather';
 import type { World } from '../world/World';
 
@@ -47,7 +47,7 @@ const RAIN_SCROLL_SPEED_BASE = (1 / 0.05 / 32) * 3;
 const RAIN_SCROLL_SPEED_RANGE = 1 / 0.05 / 32;
 const RAIN_BASE_OPACITY_MIN = 0.56;
 const RAIN_BASE_OPACITY_MAX = 0.94;
-const SNOW_SCROLL_SPEED_FACTOR = 0.38;
+const SNOW_SCROLL_SPEED_FACTOR = 0.08;
 const SNOW_BASE_OPACITY_MIN = 0.62;
 const SNOW_BASE_OPACITY_MAX = 0.96;
 const RAIN_MAX_INSTANCES =
@@ -98,7 +98,6 @@ export interface RainChunkColumn {
   readonly worldX: number;
   readonly worldZ: number;
   readonly surfaceTopY: number;
-  readonly baseSignedTemperature: number;
   readonly variation: StableRainColumnVariation;
 }
 
@@ -381,13 +380,6 @@ export const buildRainChunkCache = (chunk: Chunk, _world: World): RainChunkCache
   const columns: RainChunkColumn[] = [];
   const originX = chunkOriginX(chunk.coord);
   const originZ = chunkOriginZ(chunk.coord);
-  const temperatures = _world.generator.sampleBiomeTemperatures(
-    null,
-    originX,
-    originZ,
-    WORLD_CONFIG.chunkSizeX,
-    WORLD_CONFIG.chunkSizeZ,
-  );
 
   for (let localZ = 0; localZ < WORLD_CONFIG.chunkSizeZ; localZ += 1) {
     for (let localX = 0; localX < WORLD_CONFIG.chunkSizeX; localX += 1) {
@@ -403,15 +395,10 @@ export const buildRainChunkCache = (chunk: Chunk, _world: World): RainChunkCache
 
       const worldX = originX + localX;
       const worldZ = originZ + localZ;
-      const climateIndex = localX + localZ * WORLD_CONFIG.chunkSizeX;
       columns.push({
         worldX,
         worldZ,
         surfaceTopY,
-        baseSignedTemperature: getSignedPrecipitationTemperature(
-          temperatures[climateIndex],
-          Math.max(0, Math.floor(surfaceTopY)),
-        ),
         variation: buildStableRainColumnVariation(worldX, worldZ),
       });
     }
@@ -681,8 +668,9 @@ export class RainField {
         const rainWidthZ = RAIN_DIRECTION_Z[directionIndex] ?? RAIN_COLUMN_HALF_WIDTH;
         const distanceAlpha = (1 - clamp01(distanceSq / renderRadiusSq)) * 0.45 + 0.55;
         const rainAlpha = intensity * distanceAlpha * column.variation.alphaJitter;
-        const precipitationType: LocalPrecipitationType =
-          column.baseSignedTemperature + this.weather.temperatureOffset < 0 ? 'snow' : 'rain';
+        const precipitationType: LocalPrecipitationType = getLocalPrecipitationType(
+          this.weather.temperatureCelsius,
+        );
 
         if (rainAlpha <= 0.015) {
           continue;

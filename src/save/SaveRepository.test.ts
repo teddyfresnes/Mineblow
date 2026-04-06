@@ -42,6 +42,24 @@ describe('SaveRepository', () => {
           transitionMs: 18_000,
           windOffsetX: 4,
           windOffsetZ: -2,
+          temperatureCelsius: 16,
+          temperatureDriftElapsedMs: 0,
+        },
+        surfaceWeather: {
+          currentTick: 12,
+          accumulatorSeconds: 4,
+          history: [
+            {
+              startTick: 1,
+              endTick: 7,
+              action: 'snow_heavy',
+            },
+            {
+              startTick: 8,
+              endTick: 12,
+              action: 'thaw',
+            },
+          ],
         },
       },
     );
@@ -51,6 +69,7 @@ describe('SaveRepository', () => {
         chunkKey: '0,0',
         revision: 1,
         changes: [{ index: 12, blockId: 0 }],
+        surfaceWeatherTick: 12,
       },
     ]);
     await repository.saveWorldPreview(created.id, 'data:image/png;base64,test');
@@ -65,12 +84,14 @@ describe('SaveRepository', () => {
     });
     expect(loaded?.save.worldStats.blocksMined).toBe(2);
     expect(loaded?.save.environment?.weather.preset).toBe('cloudy_heavy');
+    expect(loaded?.save.environment?.surfaceWeather?.currentTick).toBe(12);
     expect(worlds).toHaveLength(1);
     expect(worlds[0]?.previewImageDataUrl).toBe('data:image/png;base64,test');
     expect(loaded?.chunkDiffs.get('0,0')).toEqual({
       chunkKey: '0,0',
       revision: 1,
       changes: [{ index: 12, blockId: 0 }],
+      surfaceWeatherTick: 12,
     });
   });
 });

@@ -1,6 +1,6 @@
 import { CONTROL_ACTIONS, MAX_INTERFACE_SIZE, MIN_INTERFACE_SIZE } from '../game/Controls';
 import { isUiLanguage } from '../i18n/Language';
-import { WEATHER_PRESET_CHAIN } from '../types/weather';
+import { WEATHER_PRESET_CHAIN, WEATHER_SURFACE_ACTIONS } from '../types/weather';
 import type {
   ChunkDiffRecord,
   StoredAppMeta,
@@ -54,6 +54,10 @@ const isIsoString = (value: unknown): value is string =>
 
 const isWeatherPresetValue = (value: unknown): boolean =>
   typeof value === 'string' && WEATHER_PRESET_CHAIN.includes(value as (typeof WEATHER_PRESET_CHAIN)[number]);
+
+const isWeatherSurfaceActionValue = (value: unknown): boolean =>
+  typeof value === 'string' &&
+  WEATHER_SURFACE_ACTIONS.includes(value as (typeof WEATHER_SURFACE_ACTIONS)[number]);
 
 const isInterfaceSize = (value: unknown): value is number =>
   isFiniteNumber(value) &&
@@ -115,7 +119,10 @@ const isWeatherState = (value: unknown): boolean => {
     isFiniteNumber(weather.presetDurationMs) &&
     isFiniteNumber(weather.transitionMs) &&
     isFiniteNumber(weather.windOffsetX) &&
-    isFiniteNumber(weather.windOffsetZ)
+    isFiniteNumber(weather.windOffsetZ) &&
+    (typeof weather.temperatureCelsius === 'undefined' || isFiniteNumber(weather.temperatureCelsius)) &&
+    (typeof weather.temperatureDriftElapsedMs === 'undefined' ||
+      isFiniteNumber(weather.temperatureDriftElapsedMs))
   );
 };
 
@@ -124,10 +131,25 @@ const isEnvironmentState = (value: unknown): boolean => {
     return false;
   }
   const environment = value as Record<string, unknown>;
+  const surfaceWeather = environment.surfaceWeather;
   return (
     isFiniteNumber(environment.timeOfDay) &&
     isFiniteNumber(environment.moonPhase) &&
-    isWeatherState(environment.weather)
+    isWeatherState(environment.weather) &&
+    (typeof surfaceWeather === 'undefined' ||
+      (!!surfaceWeather &&
+        typeof surfaceWeather === 'object' &&
+        isFiniteNumber((surfaceWeather as { currentTick?: unknown }).currentTick) &&
+        isFiniteNumber((surfaceWeather as { accumulatorSeconds?: unknown }).accumulatorSeconds) &&
+        Array.isArray((surfaceWeather as { history?: unknown[] }).history) &&
+        (surfaceWeather as { history: unknown[] }).history.every(
+          (entry) =>
+            !!entry &&
+            typeof entry === 'object' &&
+            isFiniteNumber((entry as { startTick?: unknown }).startTick) &&
+            isFiniteNumber((entry as { endTick?: unknown }).endTick) &&
+            isWeatherSurfaceActionValue((entry as { action?: unknown }).action),
+        )))
   );
 };
 
@@ -185,6 +207,8 @@ export const isChunkDiffRecord = (value: unknown): value is ChunkDiffRecord => {
   return (
     typeof candidate.chunkKey === 'string' &&
     typeof candidate.revision === 'number' &&
+    (typeof candidate.surfaceWeatherTick === 'undefined' ||
+      (isFiniteNumber(candidate.surfaceWeatherTick) && candidate.surfaceWeatherTick >= 0)) &&
     Array.isArray(candidate.changes) &&
     candidate.changes.every(
       (entry) =>

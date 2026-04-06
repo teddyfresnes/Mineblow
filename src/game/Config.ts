@@ -21,6 +21,7 @@ export const PLAYER_CONFIG = {
   gravity: 24,
   colliderWidth: 0.6,
   colliderHeight: 1.8,
+  autoStepHeight: 0.6,
   eyeHeight: 1.62,
   crouchEyeHeight: 1.15,
   mouseSensitivity: 0.0025,

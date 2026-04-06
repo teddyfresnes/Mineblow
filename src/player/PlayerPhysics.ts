@@ -143,6 +143,49 @@ const hasGroundSupportAt = (
   return false;
 };
 
+const tryStepUp = (
+  world: World,
+  fromPosition: [number, number, number],
+  movedPosition: [number, number, number],
+): boolean => {
+  if (
+    PLAYER_CONFIG.autoStepHeight <= 0 ||
+    !hasGroundSupportAt(world, fromPosition, PLAYER_CONFIG.autoStepHeight + 0.08)
+  ) {
+    return false;
+  }
+
+  const collisions = collectCollidingBlockBounds(world, movedPosition);
+  if (collisions.length === 0) {
+    return false;
+  }
+
+  let targetY = fromPosition[1];
+  for (const bounds of collisions) {
+    const stepHeight = bounds.maxY - fromPosition[1];
+    if (stepHeight <= COLLISION_EPSILON || stepHeight > PLAYER_CONFIG.autoStepHeight + COLLISION_EPSILON) {
+      continue;
+    }
+    targetY = Math.max(targetY, bounds.maxY);
+  }
+
+  if (targetY <= fromPosition[1] + COLLISION_EPSILON) {
+    return false;
+  }
+
+  const steppedPosition: [number, number, number] = [
+    movedPosition[0],
+    targetY,
+    movedPosition[2],
+  ];
+  if (overlapsSolid(world, steppedPosition)) {
+    return false;
+  }
+
+  movedPosition[1] = targetY;
+  return true;
+};
+
 const resolveAxis = (
   world: World,
   position: [number, number, number],
@@ -205,14 +248,20 @@ export class PlayerPhysics {
     const nextVelocity: [number, number, number] = [...velocity];
     let grounded = false;
 
+    const beforeXMove: [number, number, number] = [...nextPosition];
     nextPosition[0] += nextVelocity[0] * dt;
-    if (resolveAxis(world, nextPosition, nextVelocity, 0)) {
-      nextVelocity[0] = 0;
+    if (overlapsSolid(world, nextPosition)) {
+      if (!tryStepUp(world, beforeXMove, nextPosition) && resolveAxis(world, nextPosition, nextVelocity, 0)) {
+        nextVelocity[0] = 0;
+      }
     }
 
+    const beforeZMove: [number, number, number] = [...nextPosition];
     nextPosition[2] += nextVelocity[2] * dt;
-    if (resolveAxis(world, nextPosition, nextVelocity, 2)) {
-      nextVelocity[2] = 0;
+    if (overlapsSolid(world, nextPosition)) {
+      if (!tryStepUp(world, beforeZMove, nextPosition) && resolveAxis(world, nextPosition, nextVelocity, 2)) {
+        nextVelocity[2] = 0;
+      }
     }
 
     nextPosition[1] += nextVelocity[1] * dt;

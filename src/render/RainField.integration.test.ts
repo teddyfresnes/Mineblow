@@ -44,7 +44,7 @@ describe('RainField integration', () => {
         fogDimming: profile.fogDimming,
         ambientDimming: profile.ambientDimming,
         rainIntensity: profile.rainIntensity,
-        temperatureOffset: profile.temperatureOffset,
+        temperatureCelsius: 16,
         skyPreset: 'auto',
       });
 
@@ -98,7 +98,7 @@ describe('RainField integration', () => {
         fogDimming: profile.fogDimming,
         ambientDimming: profile.ambientDimming,
         rainIntensity: profile.rainIntensity,
-        temperatureOffset: -1,
+        temperatureCelsius: -10,
         skyPreset: 'auto',
       });
 

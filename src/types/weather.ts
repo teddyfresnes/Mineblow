@@ -18,11 +18,13 @@ export const WEATHER_SKY_PRESET_OPTIONS = [
   'gray',
   'storm',
 ] as const;
+export const WEATHER_SURFACE_ACTIONS = ['idle', 'snow', 'snow_heavy', 'thaw'] as const;
 
 export type WeatherPreset = (typeof WEATHER_PRESET_CHAIN)[number];
 export type WeatherSkyPreset = (typeof WEATHER_SKY_PRESET_OPTIONS)[number];
 export type WeatherControlMode = 'auto' | 'manual';
 export type LocalPrecipitationType = 'none' | 'rain' | 'snow';
+export type WeatherSurfaceAction = (typeof WEATHER_SURFACE_ACTIONS)[number];
 
 export interface WeatherState {
   preset: WeatherPreset;
@@ -32,6 +34,8 @@ export interface WeatherState {
   transitionMs: number;
   windOffsetX: number;
   windOffsetZ: number;
+  temperatureCelsius: number;
+  temperatureDriftElapsedMs: number;
 }
 
 export interface WeatherOverrides {
@@ -60,12 +64,25 @@ export interface WeatherVisualState {
   fogDimming: number;
   ambientDimming: number;
   rainIntensity: number;
-  temperatureOffset: number;
+  temperatureCelsius: number;
   skyPreset: WeatherSkyPreset;
+}
+
+export interface WeatherSurfaceHistoryEntry {
+  startTick: number;
+  endTick: number;
+  action: WeatherSurfaceAction;
+}
+
+export interface WeatherSurfaceState {
+  currentTick: number;
+  accumulatorSeconds: number;
+  history: WeatherSurfaceHistoryEntry[];
 }
 
 export interface WorldEnvironmentState {
   timeOfDay: number;
   moonPhase: number;
   weather: WeatherState;
+  surfaceWeather?: WeatherSurfaceState;
 }

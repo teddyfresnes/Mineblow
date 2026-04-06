@@ -492,7 +492,7 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.weatherState.fogDimming = state.fogDimming;
     this.weatherState.ambientDimming = state.ambientDimming;
     this.weatherState.rainIntensity = state.rainIntensity;
-    this.weatherState.temperatureOffset = state.temperatureOffset;
+    this.weatherState.temperatureCelsius = state.temperatureCelsius;
     this.weatherState.skyPreset = state.skyPreset;
 
     this.clouds.setWeatherState(this.weatherState);

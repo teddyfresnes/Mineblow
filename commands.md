@@ -56,12 +56,30 @@ Formats actuels:
 - `/time clock <0-24>`
 - `/time nextday`
 - `/time moon <1-8>`
+- `/seed`
+- `/temperature`
 - `/weather <clear|cloudy_light|cloudy_heavy|overcast|rain|rain_light|rain_heavy|snow|snow_heavy|storm>`
 - `/weather auto`
 - `/weather setClouds <0-100|0-1|auto>`
 - `/weather setRain <0-100|0-1|auto>`
 - `/weather setSky <auto|blue|soft|gray|storm>`
 - `/weather debug`
+
+### `/seed`
+
+Affiche la seed du monde courant.
+
+Exemple:
+
+- `/seed`
+
+### `/temperature`
+
+Affiche la temperature meteo cachee actuelle en degres Celsius.
+
+Exemple:
+
+- `/temperature`
 
 ### `/weather <preset>`
 
