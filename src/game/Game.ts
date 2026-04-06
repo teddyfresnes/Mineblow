@@ -1360,6 +1360,7 @@ export class Game {
       this.renderer.setCameraTransform(cameraPosition, rotation.yaw, rotation.pitch);
       const underwaterState = this.getCameraUnderwaterState(cameraPosition, this.session.world);
       this.renderer.setUnderwaterView(underwaterState.enabled, underwaterState.depth);
+      this.renderer.setChunkEdgeFadeOrigin(cameraPosition.x, cameraPosition.z);
     }
 
     const now = performance.now();

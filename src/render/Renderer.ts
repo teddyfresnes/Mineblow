@@ -17,6 +17,7 @@ import {
   PerspectiveCamera,
   Scene,
   SRGBColorSpace,
+  Vector2,
   Vector3,
   WebGLRenderer,
 } from 'three';
@@ -118,6 +119,8 @@ const smoothstep = (edge0: number, edge1: number, value: number): number => {
   const ratio = clamp01((value - edge0) / (edge1 - edge0));
   return ratio * ratio * (3 - 2 * ratio);
 };
+
+type MaterialShader = Parameters<NonNullable<MeshLambertMaterial['onBeforeCompile']>>[0];
 
 export type FirstPersonAnimationPreset = 'hand' | 'item';
 
@@ -226,6 +229,16 @@ export class Renderer {
   private readonly nightSkyHorizonColor = new Color(NIGHT_SKY_HORIZON_COLOR);
   private readonly nightSkyBottomColor = new Color(NIGHT_SKY_BOTTOM_COLOR);
   private readonly fogMixColor = new Color();
+  private readonly chunkEdgeFadeColor = new Color(AIR_FOG_COLOR);
+  private readonly chunkEdgeFadeVisibleMin = new Vector2();
+  private readonly chunkEdgeFadeVisibleMax = new Vector2();
+  private readonly chunkEdgeFadeBufferSize = new Vector2(
+    Math.max(0.0001, (WORLD_CONFIG.preloadRadius - WORLD_CONFIG.loadRadius) * WORLD_CONFIG.chunkSizeX),
+    Math.max(0.0001, (WORLD_CONFIG.preloadRadius - WORLD_CONFIG.loadRadius) * WORLD_CONFIG.chunkSizeZ),
+  );
+  private readonly chunkEdgeFadeEnabledUniform = {
+    value: WORLD_CONFIG.preloadRadius > WORLD_CONFIG.loadRadius ? 1 : 0,
+  };
   private readonly skyTopColor = new Color(DAY_SKY_TOP_COLOR);
   private readonly skyHorizonColor = new Color(DAY_SKY_HORIZON_COLOR);
   private readonly skyBottomColor = new Color(DAY_SKY_BOTTOM_COLOR);
@@ -293,6 +306,10 @@ export class Renderer {
     this.atlas.material.transparent = false;
     this.atlas.material.alphaTest = 0.35;
     this.atlas.material.depthWrite = true;
+    this.atlas.material.onBeforeCompile = (shader) => {
+      this.applyChunkEdgeFadeShader(shader);
+    };
+    this.atlas.material.customProgramCacheKey = () => 'chunk-edge-fade-v1';
     this.waterMaterial = new MeshLambertMaterial({
       map: atlasMap,
       color: WATER_TINT_COLOR.clone(),
@@ -304,18 +321,6 @@ export class Renderer {
       alphaTest: 0.01,
     });
     this.waterMaterial.onBeforeCompile = (shader) => {
-      shader.uniforms.uWaterTint = { value: WATER_TINT_COLOR.clone() };
-      shader.uniforms.uWaterTintStrength = { value: WATER_TINT_STRENGTH };
-      shader.uniforms.uWaterTopTintBoost = { value: WATER_TOP_TINT_BOOST };
-      shader.uniforms.uWaterTopAlphaBoost = { value: WATER_TOP_ALPHA_BOOST };
-      shader.uniforms.uWaterTopAlphaGrazeBoost = { value: WATER_TOP_ALPHA_GRAZE_BOOST };
-      shader.uniforms.uWaterLumaBlend = { value: WATER_LUMA_BLEND };
-      shader.uniforms.uWaterContrast = { value: WATER_CONTRAST };
-      shader.uniforms.uWaterSurfaceLineColor = { value: WATER_SURFACE_LINE_COLOR.clone() };
-      shader.uniforms.uWaterSurfaceLineStrength = { value: this.waterSurfaceLineStrength };
-      this.waterSurfaceLineStrengthUniform = shader.uniforms.uWaterSurfaceLineStrength as {
-        value: number;
-      };
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <common>',
         `#include <common>
@@ -347,8 +352,21 @@ diffuseColor.rgb = mix(vec3(0.5), diffuseColor.rgb, uWaterContrast);
 diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurfaceLine * uWaterSurfaceLineStrength * 0.35);
 `,
       );
+      this.applyChunkEdgeFadeShader(shader);
+      shader.uniforms.uWaterTint = { value: WATER_TINT_COLOR.clone() };
+      shader.uniforms.uWaterTintStrength = { value: WATER_TINT_STRENGTH };
+      shader.uniforms.uWaterTopTintBoost = { value: WATER_TOP_TINT_BOOST };
+      shader.uniforms.uWaterTopAlphaBoost = { value: WATER_TOP_ALPHA_BOOST };
+      shader.uniforms.uWaterTopAlphaGrazeBoost = { value: WATER_TOP_ALPHA_GRAZE_BOOST };
+      shader.uniforms.uWaterLumaBlend = { value: WATER_LUMA_BLEND };
+      shader.uniforms.uWaterContrast = { value: WATER_CONTRAST };
+      shader.uniforms.uWaterSurfaceLineColor = { value: WATER_SURFACE_LINE_COLOR.clone() };
+      shader.uniforms.uWaterSurfaceLineStrength = { value: this.waterSurfaceLineStrength };
+      this.waterSurfaceLineStrengthUniform = shader.uniforms.uWaterSurfaceLineStrength as {
+        value: number;
+      };
     };
-    this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v4';
+    this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v5';
     this.scene.add(this.sky.group);
     this.scene.add(this.clouds.group);
     this.scene.add(this.rain.group);
@@ -408,6 +426,20 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.camera.rotation.x = pitch;
     this.sky.update(position.x, position.y, position.z);
     updateSunForCamera(this.lights, position.x, position.z, this.currentSunDirection);
+  }
+
+  setChunkEdgeFadeOrigin(worldX: number, worldZ: number): void {
+    const chunkX = Math.floor(worldX / WORLD_CONFIG.chunkSizeX);
+    const chunkZ = Math.floor(worldZ / WORLD_CONFIG.chunkSizeZ);
+
+    this.chunkEdgeFadeVisibleMin.set(
+      (chunkX - WORLD_CONFIG.loadRadius) * WORLD_CONFIG.chunkSizeX,
+      (chunkZ - WORLD_CONFIG.loadRadius) * WORLD_CONFIG.chunkSizeZ,
+    );
+    this.chunkEdgeFadeVisibleMax.set(
+      (chunkX + WORLD_CONFIG.loadRadius + 1) * WORLD_CONFIG.chunkSizeX,
+      (chunkZ + WORLD_CONFIG.loadRadius + 1) * WORLD_CONFIG.chunkSizeZ,
+    );
   }
 
   setWeatherState(state: WeatherVisualState): void {
@@ -742,6 +774,7 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
       this.lights.ambient.intensity = this.airAmbientIntensity;
       this.lights.skyBounce.intensity = this.airSkyBounceIntensity;
       this.lights.sun.intensity = this.airSunIntensity;
+      this.chunkEdgeFadeColor.copy(this.airBackgroundColor);
       return;
     }
 
@@ -767,6 +800,7 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     );
     this.renderer.setClearColor(this.sceneFog.color);
     this.scene.background = this.sceneFog.color;
+    this.chunkEdgeFadeColor.copy(this.sceneFog.color);
 
     const lightScale = lerp(UNDERWATER_LIGHT_SCALE_SHALLOW, UNDERWATER_LIGHT_SCALE_DEEP, depthRatio);
     this.lights.ambient.intensity = this.airAmbientIntensity * lightScale;
@@ -1012,5 +1046,60 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     });
     uv.needsUpdate = true;
     return geometry;
+  }
+
+  private applyChunkEdgeFadeShader(shader: MaterialShader): void {
+    shader.uniforms.uChunkEdgeFadeVisibleMin = { value: this.chunkEdgeFadeVisibleMin };
+    shader.uniforms.uChunkEdgeFadeVisibleMax = { value: this.chunkEdgeFadeVisibleMax };
+    shader.uniforms.uChunkEdgeFadeBufferSize = { value: this.chunkEdgeFadeBufferSize };
+    shader.uniforms.uChunkEdgeFadeColor = { value: this.chunkEdgeFadeColor };
+    shader.uniforms.uChunkEdgeFadeEnabled = this.chunkEdgeFadeEnabledUniform;
+
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec3 vChunkEdgeFadeWorldPosition;
+`,
+      )
+      .replace(
+        '#include <worldpos_vertex>',
+        `#include <worldpos_vertex>
+vChunkEdgeFadeWorldPosition = worldPosition.xyz;
+`,
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform vec2 uChunkEdgeFadeVisibleMin;
+uniform vec2 uChunkEdgeFadeVisibleMax;
+uniform vec2 uChunkEdgeFadeBufferSize;
+uniform vec3 uChunkEdgeFadeColor;
+uniform float uChunkEdgeFadeEnabled;
+varying vec3 vChunkEdgeFadeWorldPosition;
+
+float getChunkEdgeFadeFactor(vec2 worldXZ) {
+  if (uChunkEdgeFadeEnabled < 0.5) {
+    return 0.0;
+  }
+
+  vec2 outsideMin = max(uChunkEdgeFadeVisibleMin - worldXZ, vec2(0.0));
+  vec2 outsideMax = max(worldXZ - uChunkEdgeFadeVisibleMax, vec2(0.0));
+  vec2 outsideVisible = max(outsideMin, outsideMax);
+  vec2 normalizedOutside = outsideVisible / max(uChunkEdgeFadeBufferSize, vec2(0.0001));
+  float bandProgress = max(normalizedOutside.x, normalizedOutside.y);
+  return smoothstep(0.0, 1.0, clamp(bandProgress, 0.0, 1.0));
+}
+`,
+      )
+      .replace(
+        '#include <fog_fragment>',
+        `#include <fog_fragment>
+float chunkEdgeFade = getChunkEdgeFadeFactor(vChunkEdgeFadeWorldPosition.xz);
+gl_FragColor.rgb = mix(gl_FragColor.rgb, uChunkEdgeFadeColor, chunkEdgeFade);
+`,
+      );
   }
 }
