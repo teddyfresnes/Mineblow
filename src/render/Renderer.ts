@@ -119,6 +119,10 @@ const smoothstep = (edge0: number, edge1: number, value: number): number => {
   const ratio = clamp01((value - edge0) / (edge1 - edge0));
   return ratio * ratio * (3 - 2 * ratio);
 };
+const CHUNK_EDGE_FADE_SHIFT_RESPONSE = 9;
+const CHUNK_EDGE_FADE_SHIFT_MAX_DT = 0.1;
+const CHUNK_EDGE_FADE_SHIFT_SNAP_DISTANCE =
+  Math.max(WORLD_CONFIG.chunkSizeX, WORLD_CONFIG.chunkSizeZ) * 1.5;
 
 type MaterialShader = Parameters<NonNullable<MeshLambertMaterial['onBeforeCompile']>>[0];
 
@@ -232,6 +236,8 @@ export class Renderer {
   private readonly chunkEdgeFadeColor = new Color(AIR_FOG_COLOR);
   private readonly chunkEdgeFadeVisibleMin = new Vector2();
   private readonly chunkEdgeFadeVisibleMax = new Vector2();
+  private readonly chunkEdgeFadeTargetMin = new Vector2();
+  private readonly chunkEdgeFadeTargetMax = new Vector2();
   private readonly chunkEdgeFadeBufferSize = new Vector2(
     Math.max(0.0001, (WORLD_CONFIG.preloadRadius - WORLD_CONFIG.loadRadius) * WORLD_CONFIG.chunkSizeX),
     Math.max(0.0001, (WORLD_CONFIG.preloadRadius - WORLD_CONFIG.loadRadius) * WORLD_CONFIG.chunkSizeZ),
@@ -274,6 +280,7 @@ export class Renderer {
   private actionStrength = 0;
   private jumpTimer = 0;
   private jumpStrength = 0;
+  private chunkEdgeFadeBoundsInitialized = false;
   private handAnimationProfile: FirstPersonAnimationProfile = { ...HAND_ANIMATION_PROFILE };
   private skinRequestId = 0;
 
@@ -428,18 +435,41 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     updateSunForCamera(this.lights, position.x, position.z, this.currentSunDirection);
   }
 
-  setChunkEdgeFadeOrigin(worldX: number, worldZ: number): void {
+  setChunkEdgeFadeOrigin(worldX: number, worldZ: number, dt = 0): void {
     const chunkX = Math.floor(worldX / WORLD_CONFIG.chunkSizeX);
     const chunkZ = Math.floor(worldZ / WORLD_CONFIG.chunkSizeZ);
 
-    this.chunkEdgeFadeVisibleMin.set(
+    this.chunkEdgeFadeTargetMin.set(
       (chunkX - WORLD_CONFIG.loadRadius) * WORLD_CONFIG.chunkSizeX,
       (chunkZ - WORLD_CONFIG.loadRadius) * WORLD_CONFIG.chunkSizeZ,
     );
-    this.chunkEdgeFadeVisibleMax.set(
+    this.chunkEdgeFadeTargetMax.set(
       (chunkX + WORLD_CONFIG.loadRadius + 1) * WORLD_CONFIG.chunkSizeX,
       (chunkZ + WORLD_CONFIG.loadRadius + 1) * WORLD_CONFIG.chunkSizeZ,
     );
+
+    const targetShift = Math.max(
+      Math.abs(this.chunkEdgeFadeTargetMin.x - this.chunkEdgeFadeVisibleMin.x),
+      Math.abs(this.chunkEdgeFadeTargetMin.y - this.chunkEdgeFadeVisibleMin.y),
+      Math.abs(this.chunkEdgeFadeTargetMax.x - this.chunkEdgeFadeVisibleMax.x),
+      Math.abs(this.chunkEdgeFadeTargetMax.y - this.chunkEdgeFadeVisibleMax.y),
+    );
+
+    if (
+      !this.chunkEdgeFadeBoundsInitialized ||
+      dt <= 0 ||
+      dt >= CHUNK_EDGE_FADE_SHIFT_MAX_DT ||
+      targetShift >= CHUNK_EDGE_FADE_SHIFT_SNAP_DISTANCE
+    ) {
+      this.chunkEdgeFadeVisibleMin.copy(this.chunkEdgeFadeTargetMin);
+      this.chunkEdgeFadeVisibleMax.copy(this.chunkEdgeFadeTargetMax);
+      this.chunkEdgeFadeBoundsInitialized = true;
+      return;
+    }
+
+    const blend = 1 - Math.exp(-Math.min(dt, CHUNK_EDGE_FADE_SHIFT_MAX_DT) * CHUNK_EDGE_FADE_SHIFT_RESPONSE);
+    this.chunkEdgeFadeVisibleMin.lerp(this.chunkEdgeFadeTargetMin, blend);
+    this.chunkEdgeFadeVisibleMax.lerp(this.chunkEdgeFadeTargetMax, blend);
   }
 
   setWeatherState(state: WeatherVisualState): void {

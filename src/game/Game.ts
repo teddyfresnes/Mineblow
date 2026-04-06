@@ -1349,10 +1349,13 @@ export class Game {
   }
 
   private render(): void {
+    const now = performance.now();
     if (!this.session) {
-      this.lastRenderTime = performance.now();
+      this.lastRenderTime = now;
       return;
     }
+
+    const renderDt = Math.max(0, (now - this.lastRenderTime) / 1000);
 
     if (this.session) {
       const cameraPosition = this.session.player.getCameraPosition();
@@ -1360,10 +1363,9 @@ export class Game {
       this.renderer.setCameraTransform(cameraPosition, rotation.yaw, rotation.pitch);
       const underwaterState = this.getCameraUnderwaterState(cameraPosition, this.session.world);
       this.renderer.setUnderwaterView(underwaterState.enabled, underwaterState.depth);
-      this.renderer.setChunkEdgeFadeOrigin(cameraPosition.x, cameraPosition.z);
+      this.renderer.setChunkEdgeFadeOrigin(cameraPosition.x, cameraPosition.z, renderDt);
     }
 
-    const now = performance.now();
     this.fpsFrames += 1;
     this.fpsElapsedMs += now - this.lastRenderTime;
     this.lastRenderTime = now;
