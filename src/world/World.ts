@@ -1,13 +1,19 @@
 import { WORLD_CONFIG } from '../game/Config';
 import type { BlockId } from '../types/blocks';
 import type { ChunkDiffRecord } from '../types/save';
+import type { WeatherVisualState } from '../types/weather';
 import type { ChunkCoord } from '../types/world';
 import { distanceSquared2D } from '../utils/math';
 import {
+  blocksMovement,
+  getBlockCollisionHeight,
+  getSnowCoverLevel,
   getWaterLevel,
   isPlantBlock,
+  isSnowLayerBlock,
   isWaterBlock,
   isWaterSource,
+  toSnowCoverBlockId,
   toFlowWaterId,
   WATER_FLOW_LEVEL_MAX,
 } from './BlockRegistry';
@@ -22,11 +28,18 @@ import {
   worldToLocal,
 } from './ChunkCoord';
 import { ChunkStore } from './ChunkStore';
+import { getLocalPrecipitationType } from './Precipitation';
 import { TerrainGenerator } from './TerrainGenerator';
 
 interface CompletedChunk {
   coord: ChunkCoord;
   blocks: Uint8Array;
+}
+
+interface ChunkSurfaceState {
+  blockId: BlockId;
+  blockY: number;
+  topY: number;
 }
 
 type FluidCell = [number, number, number];
@@ -56,6 +69,14 @@ const FLUID_INTERFACE_OFFSETS: Array<[number, number]> = [
   [0, -1],
 ];
 const FLUID_UPDATE_DELAY_TICKS = 5;
+const WEATHER_ACCUMULATION_STEP_SECONDS = 1.25;
+
+const hash32 = (value: number): number => {
+  let hashed = value | 0;
+  hashed = Math.imul(hashed ^ (hashed >>> 16), 0x7feb352d);
+  hashed = Math.imul(hashed ^ (hashed >>> 15), 0x846ca68b);
+  return hashed ^ (hashed >>> 16);
+};
 
 export class World {
   readonly generator: TerrainGenerator;
@@ -78,6 +99,9 @@ export class World {
   private fluidCurrentTick = 0;
   private fluidMinScheduledTick: number | null = null;
   private fluidTickAccumulator = 0;
+  private weatherAccumulationAccumulator = 0;
+  private weatherAccumulationTick = 0;
+  private weatherTemperatureBuffer: Float64Array | null = null;
   private lastStreamingSignature: string | null = null;
 
   constructor(readonly seed: string, persistedDiffs?: Map<string, ChunkDiffRecord>) {
@@ -123,6 +147,9 @@ export class World {
     this.fluidCurrentTick = 0;
     this.fluidMinScheduledTick = null;
     this.fluidTickAccumulator = 0;
+    this.weatherAccumulationAccumulator = 0;
+    this.weatherAccumulationTick = 0;
+    this.weatherTemperatureBuffer = null;
     this.lastStreamingSignature = null;
   }
 
@@ -470,6 +497,19 @@ export class World {
         this.fluidTickAccumulator = 0;
         break;
       }
+    }
+  }
+
+  tickWeatherAccumulation(dtSeconds: number, weatherState: WeatherVisualState): void {
+    if (dtSeconds <= 0) {
+      return;
+    }
+
+    this.weatherAccumulationAccumulator += dtSeconds;
+    while (this.weatherAccumulationAccumulator >= WEATHER_ACCUMULATION_STEP_SECONDS) {
+      this.weatherAccumulationAccumulator -= WEATHER_ACCUMULATION_STEP_SECONDS;
+      this.weatherAccumulationTick += 1;
+      this.processWeatherAccumulationStep(weatherState);
     }
   }
 
@@ -1049,6 +1089,149 @@ export class World {
       this.enqueueFluidCell(worldX + stepX, worldY + 1, worldZ + stepZ);
       this.enqueueFluidCell(worldX + stepX, worldY - 1, worldZ + stepZ);
     }
+  }
+
+  private processWeatherAccumulationStep(weatherState: WeatherVisualState): void {
+    if (weatherState.rainIntensity <= 0.01 || this.chunkStore.size === 0) {
+      return;
+    }
+
+    const samplesPerChunk =
+      weatherState.preset === 'snow_heavy'
+        ? 5
+        : weatherState.preset === 'snow'
+          ? 2
+          : 1;
+
+    for (const chunk of this.chunkStore.values()) {
+      const originX = chunkOriginX(chunk.coord);
+      const originZ = chunkOriginZ(chunk.coord);
+      this.weatherTemperatureBuffer = this.generator.sampleBiomeTemperatures(
+        this.weatherTemperatureBuffer,
+        originX,
+        originZ,
+        WORLD_CONFIG.chunkSizeX,
+        WORLD_CONFIG.chunkSizeZ,
+      );
+
+      for (let sampleIndex = 0; sampleIndex < samplesPerChunk; sampleIndex += 1) {
+        const sampleHash = hash32(
+          this.weatherAccumulationTick ^
+            Math.imul(chunk.coord.x, 0x45d9f3b) ^
+            Math.imul(chunk.coord.z, 0x119de1f3) ^
+            Math.imul(sampleIndex + 1, 0x9e3779b9),
+        );
+        const localX = sampleHash & (WORLD_CONFIG.chunkSizeX - 1);
+        const localZ = (sampleHash >>> 8) & (WORLD_CONFIG.chunkSizeZ - 1);
+        this.tryAccumulateSnowAtColumn(
+          chunk,
+          originX,
+          originZ,
+          localX,
+          localZ,
+          weatherState.temperatureOffset,
+        );
+      }
+    }
+  }
+
+  private tryAccumulateSnowAtColumn(
+    chunk: Chunk,
+    originX: number,
+    originZ: number,
+    localX: number,
+    localZ: number,
+    temperatureOffset: number,
+  ): void {
+    const surface = this.getChunkSurfaceState(chunk, localX, localZ);
+    if (!surface || surface.topY <= 0 || surface.topY >= WORLD_CONFIG.chunkSizeY - 0.0001) {
+      return;
+    }
+
+    const climateIndex = localX + localZ * WORLD_CONFIG.chunkSizeX;
+    const baseTemperature = this.weatherTemperatureBuffer?.[climateIndex];
+    if (typeof baseTemperature !== 'number' || !Number.isFinite(baseTemperature)) {
+      return;
+    }
+
+    const precipitationType = getLocalPrecipitationType(
+      baseTemperature,
+      Math.floor(surface.topY),
+      temperatureOffset,
+    );
+    if (precipitationType !== 'snow') {
+      return;
+    }
+
+    const worldX = originX + localX;
+    const worldZ = originZ + localZ;
+    const aboveWorldY = surface.blockY + 1;
+    const aboveBlockId =
+      aboveWorldY < WORLD_CONFIG.chunkSizeY ? this.getBlock(worldX, aboveWorldY, worldZ) : 0;
+
+    if (surface.blockId === 24) {
+      if (aboveWorldY >= WORLD_CONFIG.chunkSizeY || aboveBlockId !== 0) {
+        return;
+      }
+      void this.setBlock(worldX, aboveWorldY, worldZ, 33);
+      return;
+    }
+
+    const snowLevel = getSnowCoverLevel(surface.blockId);
+    if (snowLevel !== null) {
+      if (snowLevel >= 8) {
+        return;
+      }
+      void this.setBlock(worldX, surface.blockY, worldZ, toSnowCoverBlockId(snowLevel + 1));
+      return;
+    }
+
+    if (!this.canSupportSnowAccumulation(surface.blockId) || aboveBlockId !== 0) {
+      return;
+    }
+
+    void this.setBlock(worldX, aboveWorldY, worldZ, 33);
+  }
+
+  private getChunkSurfaceState(
+    chunk: Chunk,
+    localX: number,
+    localZ: number,
+  ): ChunkSurfaceState | null {
+    for (let y = WORLD_CONFIG.chunkSizeY - 1; y >= 0; y -= 1) {
+      const blockId = chunk.getBlock(localX, y, localZ);
+      if (blockId === 0) {
+        continue;
+      }
+      if (isWaterBlock(blockId)) {
+        return {
+          blockId,
+          blockY: y,
+          topY: y + 1,
+        };
+      }
+      if (!blocksMovement(blockId)) {
+        continue;
+      }
+      return {
+        blockId,
+        blockY: y,
+        topY: y + getBlockCollisionHeight(blockId),
+      };
+    }
+
+    return null;
+  }
+
+  private canSupportSnowAccumulation(blockId: BlockId): boolean {
+    return (
+      blockId !== 0 &&
+      blockId !== 4 &&
+      blockId !== 5 &&
+      !isPlantBlock(blockId) &&
+      !isWaterBlock(blockId) &&
+      !isSnowLayerBlock(blockId)
+    );
   }
 
   private queueMeshUpdate(chunkKey: string): void {

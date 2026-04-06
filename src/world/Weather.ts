@@ -23,6 +23,7 @@ export interface WeatherProfile {
   fogDimming: number;
   ambientDimming: number;
   rainIntensity: number;
+  temperatureOffset: number;
   windSpeed: number;
   minDurationMs: number;
   maxDurationMs: number;
@@ -56,6 +57,7 @@ const WEATHER_PROFILE_BY_PRESET: Record<WeatherPreset, WeatherProfile> = {
     fogDimming: 0.02,
     ambientDimming: 0.02,
     rainIntensity: 0,
+    temperatureOffset: 0.18,
     windSpeed: 0.00024,
     minDurationMs: 95_000,
     maxDurationMs: 210_000,
@@ -75,6 +77,7 @@ const WEATHER_PROFILE_BY_PRESET: Record<WeatherPreset, WeatherProfile> = {
     fogDimming: 0.05,
     ambientDimming: 0.08,
     rainIntensity: 0,
+    temperatureOffset: 0.12,
     windSpeed: 0.00029,
     minDurationMs: 90_000,
     maxDurationMs: 185_000,
@@ -94,6 +97,7 @@ const WEATHER_PROFILE_BY_PRESET: Record<WeatherPreset, WeatherProfile> = {
     fogDimming: 0.12,
     ambientDimming: 0.16,
     rainIntensity: 0,
+    temperatureOffset: 0.08,
     windSpeed: 0.00035,
     minDurationMs: 80_000,
     maxDurationMs: 165_000,
@@ -113,6 +117,7 @@ const WEATHER_PROFILE_BY_PRESET: Record<WeatherPreset, WeatherProfile> = {
     fogDimming: 0.24,
     ambientDimming: 0.28,
     rainIntensity: 0,
+    temperatureOffset: 0.03,
     windSpeed: 0.00043,
     minDurationMs: 75_000,
     maxDurationMs: 150_000,
@@ -132,6 +137,7 @@ const WEATHER_PROFILE_BY_PRESET: Record<WeatherPreset, WeatherProfile> = {
     fogDimming: 0.28,
     ambientDimming: 0.3,
     rainIntensity: 0.16,
+    temperatureOffset: 0.06,
     windSpeed: 0.00048,
     minDurationMs: 74_000,
     maxDurationMs: 142_000,
@@ -151,6 +157,7 @@ const WEATHER_PROFILE_BY_PRESET: Record<WeatherPreset, WeatherProfile> = {
     fogDimming: 0.34,
     ambientDimming: 0.36,
     rainIntensity: 0.38,
+    temperatureOffset: 0.02,
     windSpeed: 0.00052,
     minDurationMs: 70_000,
     maxDurationMs: 135_000,
@@ -170,11 +177,52 @@ const WEATHER_PROFILE_BY_PRESET: Record<WeatherPreset, WeatherProfile> = {
     fogDimming: 0.46,
     ambientDimming: 0.44,
     rainIntensity: 0.9,
+    temperatureOffset: 0.01,
     windSpeed: 0.00064,
     minDurationMs: 55_000,
     maxDurationMs: 120_000,
     minTransitionMs: 28_000,
     maxTransitionMs: 40_000,
+  },
+  snow: {
+    cloudCoverage: 0.95,
+    cloudDensity: 0.94,
+    cloudThickness: 0.9,
+    cloudSharpness: 0.26,
+    cloudGrayness: 0.86,
+    cloudOpacity: 0.99,
+    skyGrayness: 0.82,
+    skyBrightness: 0.64,
+    sunVisibility: 0.06,
+    fogDimming: 0.48,
+    ambientDimming: 0.46,
+    rainIntensity: 0.56,
+    temperatureOffset: -0.18,
+    windSpeed: 0.00042,
+    minDurationMs: 52_000,
+    maxDurationMs: 112_000,
+    minTransitionMs: 28_000,
+    maxTransitionMs: 40_000,
+  },
+  snow_heavy: {
+    cloudCoverage: 1,
+    cloudDensity: 1,
+    cloudThickness: 1,
+    cloudSharpness: 0.2,
+    cloudGrayness: 0.94,
+    cloudOpacity: 1,
+    skyGrayness: 0.9,
+    skyBrightness: 0.54,
+    sunVisibility: 0.03,
+    fogDimming: 0.56,
+    ambientDimming: 0.52,
+    rainIntensity: 0.94,
+    temperatureOffset: -0.28,
+    windSpeed: 0.0005,
+    minDurationMs: 42_000,
+    maxDurationMs: 88_000,
+    minTransitionMs: 30_000,
+    maxTransitionMs: 42_000,
   },
   storm: {
     cloudCoverage: 1,
@@ -189,6 +237,7 @@ const WEATHER_PROFILE_BY_PRESET: Record<WeatherPreset, WeatherProfile> = {
     fogDimming: 0.56,
     ambientDimming: 0.52,
     rainIntensity: 1,
+    temperatureOffset: 0.05,
     windSpeed: 0.00078,
     minDurationMs: 45_000,
     maxDurationMs: 95_000,
@@ -345,21 +394,52 @@ export const pickNextWeatherPreset = (
   currentPreset: WeatherPreset,
   random: () => number = Math.random,
 ): WeatherPreset => {
-  const currentIndex = WEATHER_PRESET_CHAIN.indexOf(currentPreset);
-  if (currentIndex < 0) {
-    return DEFAULT_WEATHER_PRESET;
-  }
+  const roll = clamp01(random());
 
-  const stepRoll = clamp01(random());
-  let step = 0;
-  if (stepRoll < 0.23) {
-    step = -1;
-  } else if (stepRoll > 0.77) {
-    step = 1;
-  }
+  switch (currentPreset) {
+    case 'rain_heavy':
+      if (roll < 0.2) {
+        return 'rain_light';
+      }
+      if (roll < 0.94) {
+        return 'rain_heavy';
+      }
+      return 'snow';
+    case 'snow':
+      if (roll < 0.28) {
+        return 'rain_heavy';
+      }
+      if (roll < 0.92) {
+        return 'snow';
+      }
+      return 'snow_heavy';
+    case 'snow_heavy':
+      if (roll < 0.36) {
+        return 'snow';
+      }
+      if (roll < 0.98) {
+        return 'snow_heavy';
+      }
+      return 'storm';
+    case 'storm':
+      return roll < 0.04 ? 'snow_heavy' : 'storm';
+    default: {
+      const currentIndex = WEATHER_PRESET_CHAIN.indexOf(currentPreset);
+      if (currentIndex < 0) {
+        return DEFAULT_WEATHER_PRESET;
+      }
 
-  const nextIndex = clamp(currentIndex + step, 0, WEATHER_PRESET_CHAIN.length - 1);
-  return WEATHER_PRESET_CHAIN[nextIndex];
+      let step = 0;
+      if (roll < 0.23) {
+        step = -1;
+      } else if (roll > 0.77) {
+        step = 1;
+      }
+
+      const nextIndex = clamp(currentIndex + step, 0, WEATHER_PRESET_CHAIN.length - 1);
+      return WEATHER_PRESET_CHAIN[nextIndex];
+    }
+  }
 };
 
 export const retimeWeatherPreset = (
@@ -465,6 +545,7 @@ export const buildWeatherVisualState = (
     fogDimming: lerp(previous.fogDimming, current.fogDimming, transitionAlpha),
     ambientDimming: lerp(previous.ambientDimming, current.ambientDimming, transitionAlpha),
     rainIntensity: lerp(previous.rainIntensity, current.rainIntensity, transitionAlpha),
+    temperatureOffset: lerp(previous.temperatureOffset, current.temperatureOffset, transitionAlpha),
     skyPreset: overrides.skyPreset,
   };
 

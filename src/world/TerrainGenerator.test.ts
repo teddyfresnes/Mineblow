@@ -133,4 +133,24 @@ describe('TerrainGenerator', () => {
     expect(diamondCount).toBeGreaterThan(0);
     expect(lapisCount).toBeGreaterThan(0);
   });
+
+  it('lays natural snow down as the thinnest snow layer', () => {
+    const generator = new TerrainGenerator('alpha') as any;
+    const blocks = new Uint8Array(
+      WORLD_CONFIG.chunkSizeX * WORLD_CONFIG.chunkSizeY * WORLD_CONFIG.chunkSizeZ,
+    );
+    blocks[Chunk.getIndex(4, 70, 4)] = 1;
+
+    generator.sampleBiomeTemperatures = (
+      _target: Float64Array | null,
+      _originX: number,
+      _originZ: number,
+      width: number,
+      depth: number,
+    ) => new Float64Array(width * depth).fill(0);
+
+    generator.applySnow({ x: 0, z: 0 }, blocks);
+
+    expect(blocks[Chunk.getIndex(4, 71, 4)]).toBe(33);
+  });
 });

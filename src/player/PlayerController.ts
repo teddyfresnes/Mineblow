@@ -5,7 +5,7 @@ import type { PlayerState } from '../types/player';
 import { clamp } from '../utils/math';
 import type { InputController } from './InputController';
 import { PlayerPhysics } from './PlayerPhysics';
-import { isSolidBlock } from '../world/BlockRegistry';
+import { blocksMovement, getBlockCollisionHeight } from '../world/BlockRegistry';
 import type { World } from '../world/World';
 
 const WATER_FLOW_PUSH_SPEED = 0.98;
@@ -439,8 +439,8 @@ export class PlayerController {
     };
   }
 
-  canOccupyBlock(blockX: number, blockY: number, blockZ: number): boolean {
-    return !PlayerPhysics.wouldCollideWithBlock(this.state.position, blockX, blockY, blockZ);
+  canOccupyBlock(blockX: number, blockY: number, blockZ: number, blockHeight = 1): boolean {
+    return !PlayerPhysics.wouldCollideWithBlock(this.state.position, blockX, blockY, blockZ, blockHeight);
   }
 
   isCrouched(): boolean {
@@ -492,10 +492,16 @@ export class PlayerController {
     for (const lateralOffset of [-0.16, 0, 0.16]) {
       const worldX = Math.floor(probeX + right.x * lateralOffset);
       const worldZ = Math.floor(probeZ + right.z * lateralOffset);
+      const feetBlockId = world.getBlock(worldX, feetY, worldZ);
+      const chestBlockId = world.getBlock(worldX, chestY, worldZ);
+      const headBlockId = world.getBlock(worldX, headY, worldZ);
+      const feetObstacle =
+        blocksMovement(feetBlockId) &&
+        feetY + getBlockCollisionHeight(feetBlockId) > this.state.position[1] + 0.5;
       if (
-        isSolidBlock(world.getBlock(worldX, feetY, worldZ)) ||
-        isSolidBlock(world.getBlock(worldX, chestY, worldZ)) ||
-        isSolidBlock(world.getBlock(worldX, headY, worldZ))
+        feetObstacle ||
+        blocksMovement(chestBlockId) ||
+        blocksMovement(headBlockId)
       ) {
         return true;
       }

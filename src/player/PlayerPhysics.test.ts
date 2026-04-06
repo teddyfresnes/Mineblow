@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PlayerPhysics } from './PlayerPhysics';
-import { isWaterBlock, toFlowWaterId } from '../world/BlockRegistry';
+import { isWaterBlock, toFlowWaterId, toSnowCoverBlockId } from '../world/BlockRegistry';
 import { World } from '../world/World';
 import { waterLevelToSurfaceHeight } from '../world/WaterSurface';
 
@@ -91,5 +91,38 @@ describe('PlayerPhysics', () => {
       expect(state.depthBlocks).toBe(legacyDepth);
       expect(state.inWater).toBe(legacyDepth > 0);
     }
+  });
+
+  it('lands on partial snow layers at their real collision height', () => {
+    const world = new World('physics-snow-layer');
+    world.primeAround(0, 0, 0);
+
+    for (let x = 0; x <= 15; x += 1) {
+      for (let z = 0; z <= 15; z += 1) {
+        world.setBlock(x, 90, z, 3);
+        for (let y = 91; y < 96; y += 1) {
+          world.setBlock(x, y, z, 0);
+        }
+      }
+    }
+    world.setBlock(4, 91, 4, toSnowCoverBlockId(4));
+
+    let position: [number, number, number] = [4.5, 95, 4.5];
+    let velocity: [number, number, number] = [0, 0, 0];
+    let grounded = false;
+
+    for (let step = 0; step < 120; step += 1) {
+      velocity[1] -= 22 / 60;
+      const result = PlayerPhysics.simulate(world, position, velocity, 1 / 60);
+      position = result.position;
+      velocity = result.velocity;
+      grounded = result.grounded;
+      if (grounded) {
+        break;
+      }
+    }
+
+    expect(grounded).toBe(true);
+    expect(position[1]).toBeCloseTo(91.5, 4);
   });
 });

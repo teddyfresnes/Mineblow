@@ -21,15 +21,17 @@ import {
 } from 'three';
 import { WORLD_CONFIG } from '../game/Config';
 import type { BlockId } from '../types/blocks';
-import type { WeatherVisualState } from '../types/weather';
-import { isSolidBlock, isWaterBlock } from '../world/BlockRegistry';
+import type { LocalPrecipitationType, WeatherVisualState } from '../types/weather';
+import { blocksMovement, getBlockCollisionHeight, isWaterBlock } from '../world/BlockRegistry';
 import type { Chunk } from '../world/Chunk';
 import { chunkOriginX, chunkOriginZ, toChunkKey, worldToChunkCoord } from '../world/ChunkCoord';
+import { getSignedPrecipitationTemperature } from '../world/Precipitation';
 import { createDefaultWeatherVisualState } from '../world/Weather';
 import type { World } from '../world/World';
 
 const WEATHER_TEXTURE_LOADER = new TextureLoader();
 const RAIN_TEXTURE_URL = new URL('../../assets/textures/environment/rain.png', import.meta.url).href;
+const SNOW_TEXTURE_URL = new URL('../../assets/textures/environment/snow.png', import.meta.url).href;
 
 const RAIN_GRID_SIZE = 32;
 const RAIN_GRID_CENTER = RAIN_GRID_SIZE / 2;
@@ -45,6 +47,9 @@ const RAIN_SCROLL_SPEED_BASE = (1 / 0.05 / 32) * 3;
 const RAIN_SCROLL_SPEED_RANGE = 1 / 0.05 / 32;
 const RAIN_BASE_OPACITY_MIN = 0.56;
 const RAIN_BASE_OPACITY_MAX = 0.94;
+const SNOW_SCROLL_SPEED_FACTOR = 0.38;
+const SNOW_BASE_OPACITY_MIN = 0.62;
+const SNOW_BASE_OPACITY_MAX = 0.96;
 const RAIN_MAX_INSTANCES =
   (RAIN_MAX_RENDER_RADIUS * 2 + 1) * (RAIN_MAX_RENDER_RADIUS * 2 + 1);
 const SPLASH_MAX_VARIANTS_PER_COLUMN = 4;
@@ -92,7 +97,8 @@ export interface StableRainColumnVariation {
 export interface RainChunkColumn {
   readonly worldX: number;
   readonly worldZ: number;
-  readonly blockingY: number;
+  readonly surfaceTopY: number;
+  readonly baseSignedTemperature: number;
   readonly variation: StableRainColumnVariation;
 }
 
@@ -121,12 +127,12 @@ const toLocalCoord = (value: number): number =>
   ((value % WORLD_CONFIG.chunkSizeX) + WORLD_CONFIG.chunkSizeX) % WORLD_CONFIG.chunkSizeX;
 
 const isPrecipitationBlockingBlock = (blockId: BlockId): boolean =>
-  blockId !== 0 && (isSolidBlock(blockId) || isWaterBlock(blockId));
+  blockId !== 0 && (blocksMovement(blockId) || isWaterBlock(blockId));
 
-const createRainTexture = (): AsyncTextureState => {
+const createWeatherTexture = (textureUrl: string): AsyncTextureState => {
   const ready = { value: typeof window === 'undefined' };
   const texture = WEATHER_TEXTURE_LOADER.load(
-    RAIN_TEXTURE_URL,
+    textureUrl,
     () => {
       ready.value = true;
     },
@@ -375,25 +381,37 @@ export const buildRainChunkCache = (chunk: Chunk, _world: World): RainChunkCache
   const columns: RainChunkColumn[] = [];
   const originX = chunkOriginX(chunk.coord);
   const originZ = chunkOriginZ(chunk.coord);
+  const temperatures = _world.generator.sampleBiomeTemperatures(
+    null,
+    originX,
+    originZ,
+    WORLD_CONFIG.chunkSizeX,
+    WORLD_CONFIG.chunkSizeZ,
+  );
 
   for (let localZ = 0; localZ < WORLD_CONFIG.chunkSizeZ; localZ += 1) {
     for (let localX = 0; localX < WORLD_CONFIG.chunkSizeX; localX += 1) {
-      let blockingY = -1;
+      let surfaceTopY = -1;
       for (let worldY = WORLD_CONFIG.chunkSizeY - 1; worldY >= 0; worldY -= 1) {
         const blockId = chunk.getBlock(localX, worldY, localZ);
         if (!isPrecipitationBlockingBlock(blockId)) {
           continue;
         }
-        blockingY = worldY;
+        surfaceTopY = worldY + (isWaterBlock(blockId) ? 1 : getBlockCollisionHeight(blockId));
         break;
       }
 
       const worldX = originX + localX;
       const worldZ = originZ + localZ;
+      const climateIndex = localX + localZ * WORLD_CONFIG.chunkSizeX;
       columns.push({
         worldX,
         worldZ,
-        blockingY,
+        surfaceTopY,
+        baseSignedTemperature: getSignedPrecipitationTemperature(
+          temperatures[climateIndex],
+          Math.max(0, Math.floor(surfaceTopY)),
+        ),
         variation: buildStableRainColumnVariation(worldX, worldZ),
       });
     }
@@ -434,11 +452,15 @@ export class RainField {
   readonly group = new Group();
 
   private readonly rainGeometry = createVerticalQuadGeometry();
+  private readonly snowGeometry = createVerticalQuadGeometry();
   private readonly splashGeometry = createSplashGeometry();
-  private readonly rainTextureState = createRainTexture();
+  private readonly rainTextureState = createWeatherTexture(RAIN_TEXTURE_URL);
+  private readonly snowTextureState = createWeatherTexture(SNOW_TEXTURE_URL);
   private readonly rainMaterial = createRainMaterial(this.rainTextureState.texture);
+  private readonly snowMaterial = createRainMaterial(this.snowTextureState.texture);
   private readonly splashMaterial = createSplashMaterial();
   private readonly rainMesh = new Mesh(this.rainGeometry, this.rainMaterial);
+  private readonly snowMesh = new Mesh(this.snowGeometry, this.snowMaterial);
   private readonly splashMesh = new Mesh(this.splashGeometry, this.splashMaterial);
   private readonly rainCenters = new Float32Array(RAIN_MAX_INSTANCES * 3);
   private readonly rainWidthDirs = new Float32Array(RAIN_MAX_INSTANCES * 2);
@@ -446,6 +468,12 @@ export class RainField {
   private readonly rainVScales = new Float32Array(RAIN_MAX_INSTANCES);
   private readonly rainVOffsets = new Float32Array(RAIN_MAX_INSTANCES);
   private readonly rainAlphas = new Float32Array(RAIN_MAX_INSTANCES);
+  private readonly snowCenters = new Float32Array(RAIN_MAX_INSTANCES * 3);
+  private readonly snowWidthDirs = new Float32Array(RAIN_MAX_INSTANCES * 2);
+  private readonly snowHeights = new Float32Array(RAIN_MAX_INSTANCES);
+  private readonly snowVScales = new Float32Array(RAIN_MAX_INSTANCES);
+  private readonly snowVOffsets = new Float32Array(RAIN_MAX_INSTANCES);
+  private readonly snowAlphas = new Float32Array(RAIN_MAX_INSTANCES);
   private readonly splashCenters = new Float32Array(SPLASH_MAX_INSTANCES * 3);
   private readonly splashSizes = new Float32Array(SPLASH_MAX_INSTANCES);
   private readonly splashAlphas = new Float32Array(SPLASH_MAX_INSTANCES);
@@ -485,6 +513,30 @@ export class RainField {
       'instanceAlpha',
       setDynamicUsage(new InstancedBufferAttribute(this.rainAlphas, 1)),
     );
+    this.snowGeometry.setAttribute(
+      'instanceCenter',
+      setDynamicUsage(new InstancedBufferAttribute(this.snowCenters, 3)),
+    );
+    this.snowGeometry.setAttribute(
+      'instanceWidthDir',
+      setDynamicUsage(new InstancedBufferAttribute(this.snowWidthDirs, 2)),
+    );
+    this.snowGeometry.setAttribute(
+      'instanceHeight',
+      setDynamicUsage(new InstancedBufferAttribute(this.snowHeights, 1)),
+    );
+    this.snowGeometry.setAttribute(
+      'instanceVScale',
+      setDynamicUsage(new InstancedBufferAttribute(this.snowVScales, 1)),
+    );
+    this.snowGeometry.setAttribute(
+      'instanceVOffset',
+      setDynamicUsage(new InstancedBufferAttribute(this.snowVOffsets, 1)),
+    );
+    this.snowGeometry.setAttribute(
+      'instanceAlpha',
+      setDynamicUsage(new InstancedBufferAttribute(this.snowAlphas, 1)),
+    );
 
     this.splashGeometry.setAttribute(
       'instanceCenter',
@@ -504,12 +556,17 @@ export class RainField {
     this.rainMesh.updateMatrix();
     this.rainMesh.renderOrder = 4;
     this.rainMesh.visible = false;
+    this.snowMesh.frustumCulled = false;
+    this.snowMesh.matrixAutoUpdate = false;
+    this.snowMesh.updateMatrix();
+    this.snowMesh.renderOrder = 4;
+    this.snowMesh.visible = false;
     this.splashMesh.frustumCulled = false;
     this.splashMesh.matrixAutoUpdate = false;
     this.splashMesh.updateMatrix();
     this.splashMesh.renderOrder = 5;
     this.splashMesh.visible = false;
-    this.group.add(this.rainMesh, this.splashMesh);
+    this.group.add(this.rainMesh, this.snowMesh, this.splashMesh);
   }
 
   setWeatherState(state: WeatherVisualState): void {
@@ -539,7 +596,6 @@ export class RainField {
     const cameraY = camera.position.y;
     const cameraZ = camera.position.z;
     const cameraBlockX = Math.floor(cameraX);
-    const cameraBlockY = Math.floor(cameraY);
     const cameraBlockZ = Math.floor(cameraZ);
     const renderRadius = Math.round(lerp(RAIN_MIN_RENDER_RADIUS, RAIN_MAX_RENDER_RADIUS, intensity));
     const renderRadiusSq = (renderRadius + 0.5) * (renderRadius + 0.5);
@@ -554,6 +610,7 @@ export class RainField {
     );
 
     let rainCount = 0;
+    let snowCount = 0;
     let splashCount = 0;
     let activeChunkKey = '';
     let activeCache: RainChunkCache | null = null;
@@ -610,9 +667,9 @@ export class RainField {
           continue;
         }
 
-        const precipitationY = Math.max(0, column.blockingY + 1);
-        const visibleBottom = Math.max(cameraBlockY - RAIN_VERTICAL_RANGE, precipitationY);
-        const visibleTop = Math.max(cameraBlockY + RAIN_VERTICAL_RANGE, precipitationY);
+        const precipitationY = Math.max(0, column.surfaceTopY);
+        const visibleBottom = Math.max(cameraY - RAIN_VERTICAL_RANGE, precipitationY);
+        const visibleTop = Math.max(cameraY + RAIN_VERTICAL_RANGE, precipitationY);
         const rainHeight = visibleTop - visibleBottom;
 
         if (rainHeight <= 0) {
@@ -624,12 +681,14 @@ export class RainField {
         const rainWidthZ = RAIN_DIRECTION_Z[directionIndex] ?? RAIN_COLUMN_HALF_WIDTH;
         const distanceAlpha = (1 - clamp01(distanceSq / renderRadiusSq)) * 0.45 + 0.55;
         const rainAlpha = intensity * distanceAlpha * column.variation.alphaJitter;
+        const precipitationType: LocalPrecipitationType =
+          column.baseSignedTemperature + this.weather.temperatureOffset < 0 ? 'snow' : 'rain';
 
         if (rainAlpha <= 0.015) {
           continue;
         }
 
-        if (rainCount < RAIN_MAX_INSTANCES) {
+        if (precipitationType === 'rain' && rainCount < RAIN_MAX_INSTANCES) {
           const rainCenterIndex = rainCount * 3;
           const rainWidthIndex = rainCount * 2;
           this.rainCenters[rainCenterIndex] = worldX + 0.5;
@@ -647,10 +706,28 @@ export class RainField {
           rainCount += 1;
         }
 
+        if (precipitationType === 'snow' && snowCount < RAIN_MAX_INSTANCES) {
+          const snowCenterIndex = snowCount * 3;
+          const snowWidthIndex = snowCount * 2;
+          this.snowCenters[snowCenterIndex] = worldX + 0.5;
+          this.snowCenters[snowCenterIndex + 1] = visibleBottom;
+          this.snowCenters[snowCenterIndex + 2] = worldZ + 0.5;
+          this.snowWidthDirs[snowWidthIndex] = rainWidthX;
+          this.snowWidthDirs[snowWidthIndex + 1] = rainWidthZ;
+          this.snowHeights[snowCount] = rainHeight;
+          this.snowVScales[snowCount] = rainHeight * RAIN_UV_SCALE_PER_BLOCK;
+          this.snowVOffsets[snowCount] =
+            visibleBottom * RAIN_UV_SCALE_PER_BLOCK +
+            column.variation.scrollOffset +
+            this.elapsedSeconds * (column.variation.scrollSpeed * SNOW_SCROLL_SPEED_FACTOR);
+          this.snowAlphas[snowCount] = rainAlpha * 0.94;
+          snowCount += 1;
+        }
+
         const splashWithinView =
           precipitationY >= cameraY - RAIN_VERTICAL_RANGE - 1 &&
           precipitationY <= cameraY + RAIN_VERTICAL_RANGE + 2;
-        if (!splashWithinView || distanceSq > splashRenderRadiusSq) {
+        if (precipitationType !== 'rain' || !splashWithinView || distanceSq > splashRenderRadiusSq) {
           continue;
         }
 
@@ -678,7 +755,7 @@ export class RainField {
       }
     }
 
-    this.commitInstanceData(rainCount, splashCount, intensity);
+    this.commitInstanceData(rainCount, snowCount, splashCount, intensity);
     this.pruneChunkCaches();
   }
 
@@ -686,9 +763,12 @@ export class RainField {
     this.group.visible = false;
     this.rainGeometry.instanceCount = 0;
     this.rainMesh.visible = false;
+    this.snowGeometry.instanceCount = 0;
+    this.snowMesh.visible = false;
     this.splashGeometry.instanceCount = 0;
     this.splashMesh.visible = false;
     this.rainMaterial.uniforms.uOpacity.value = 0;
+    this.snowMaterial.uniforms.uOpacity.value = 0;
     this.splashMaterial.uniforms.uOpacity.value = 0;
     this.splashMaterial.uniforms.uTime.value = this.elapsedSeconds;
     if (this.chunkCaches.size > 0) {
@@ -696,11 +776,21 @@ export class RainField {
     }
   }
 
-  private commitInstanceData(rainCount: number, splashCount: number, intensity: number): void {
+  private commitInstanceData(
+    rainCount: number,
+    snowCount: number,
+    splashCount: number,
+    intensity: number,
+  ): void {
     const rainTextureReady = this.rainTextureState.ready.value;
-    this.group.visible = rainTextureReady && (rainCount > 0 || splashCount > 0);
+    const snowTextureReady = this.snowTextureState.ready.value;
+    this.group.visible =
+      (rainTextureReady && (rainCount > 0 || splashCount > 0)) ||
+      (snowTextureReady && snowCount > 0);
     this.rainGeometry.instanceCount = rainTextureReady ? rainCount : 0;
     this.rainMesh.visible = rainTextureReady && rainCount > 0;
+    this.snowGeometry.instanceCount = snowTextureReady ? snowCount : 0;
+    this.snowMesh.visible = snowTextureReady && snowCount > 0;
     this.splashGeometry.instanceCount = rainTextureReady ? splashCount : 0;
     this.splashMesh.visible = rainTextureReady && splashCount > 0;
     const splashDayBoost = clamp01(
@@ -710,6 +800,11 @@ export class RainField {
     this.rainMaterial.uniforms.uOpacity.value = lerp(
       RAIN_BASE_OPACITY_MIN,
       RAIN_BASE_OPACITY_MAX,
+      Math.sqrt(intensity),
+    );
+    this.snowMaterial.uniforms.uOpacity.value = lerp(
+      SNOW_BASE_OPACITY_MIN,
+      SNOW_BASE_OPACITY_MAX,
       Math.sqrt(intensity),
     );
     this.splashMaterial.uniforms.uOpacity.value = lerp(
@@ -740,6 +835,24 @@ export class RainField {
     (
       this.rainGeometry.getAttribute('instanceAlpha') as InstancedBufferAttribute
     ).needsUpdate = rainTextureReady && rainCount > 0;
+    (
+      this.snowGeometry.getAttribute('instanceCenter') as InstancedBufferAttribute
+    ).needsUpdate = snowTextureReady && snowCount > 0;
+    (
+      this.snowGeometry.getAttribute('instanceWidthDir') as InstancedBufferAttribute
+    ).needsUpdate = snowTextureReady && snowCount > 0;
+    (
+      this.snowGeometry.getAttribute('instanceHeight') as InstancedBufferAttribute
+    ).needsUpdate = snowTextureReady && snowCount > 0;
+    (
+      this.snowGeometry.getAttribute('instanceVScale') as InstancedBufferAttribute
+    ).needsUpdate = snowTextureReady && snowCount > 0;
+    (
+      this.snowGeometry.getAttribute('instanceVOffset') as InstancedBufferAttribute
+    ).needsUpdate = snowTextureReady && snowCount > 0;
+    (
+      this.snowGeometry.getAttribute('instanceAlpha') as InstancedBufferAttribute
+    ).needsUpdate = snowTextureReady && snowCount > 0;
     (
       this.splashGeometry.getAttribute('instanceCenter') as InstancedBufferAttribute
     ).needsUpdate = rainTextureReady && splashCount > 0;

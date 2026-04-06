@@ -31,7 +31,14 @@ export type BlockId =
   | 29
   | 30
   | 31
-  | 32;
+  | 32
+  | 33
+  | 34
+  | 35
+  | 36
+  | 37
+  | 38
+  | 39;
 
 export type BlockKey =
   | 'air'
@@ -66,7 +73,14 @@ export type BlockKey =
   | 'water_flow_4'
   | 'water_flow_5'
   | 'water_flow_6'
-  | 'water_flow_7';
+  | 'water_flow_7'
+  | 'snow_layer_1'
+  | 'snow_layer_2'
+  | 'snow_layer_3'
+  | 'snow_layer_4'
+  | 'snow_layer_5'
+  | 'snow_layer_6'
+  | 'snow_layer_7';
 
 export interface BlockDefinition {
   id: BlockId;
@@ -82,4 +96,6 @@ export interface BlockDefinition {
   transparent?: boolean;
   liquid?: boolean;
   plant?: boolean;
+  collisionHeight?: number;
+  fullCubeOccluder?: boolean;
 }

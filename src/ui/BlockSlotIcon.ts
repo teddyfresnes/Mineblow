@@ -19,6 +19,7 @@ const LEFT_BOTTOM: Point = { x: 2, y: 50 };
 const TILE_TEXTURES: Record<string, string> = {
   grass_top: new URL('../../assets/textures/blocks/grass_top.png', import.meta.url).href,
   grass_side: new URL('../../assets/textures/blocks/grass_side.png', import.meta.url).href,
+  grass_side_snowed: new URL('../../assets/textures/blocks/grass_side_snowed.png', import.meta.url).href,
   dirt: new URL('../../assets/textures/blocks/dirt.png', import.meta.url).href,
   stone: new URL('../../assets/textures/blocks/stone.png', import.meta.url).href,
   wood_side: new URL('../../assets/textures/blocks/log_oak.png', import.meta.url).href,

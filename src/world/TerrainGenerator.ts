@@ -9,7 +9,9 @@ import { Chunk } from './Chunk';
 import { chunkOriginX, chunkOriginZ, toChunkKey } from './ChunkCoord';
 import { NoiseOctaves } from './LegacyNoise';
 import { LegacyRandom } from './LegacyRandom';
+import { getSignedPrecipitationTemperature } from './Precipitation';
 import { WORLDGEN_PROFILE } from './WorldgenProfile';
+import { isSnowCoverBlock } from './BlockRegistry';
 
 const CHUNK_WIDTH = WORLD_CONFIG.chunkSizeX;
 const CHUNK_HEIGHT = WORLD_CONFIG.chunkSizeY;
@@ -107,6 +109,16 @@ export class TerrainGenerator {
   generateChunk(coord: ChunkCoord): Chunk {
     const snapshot = this.getChunkSnapshot(coord);
     return new Chunk(coord, snapshot.blocks.slice());
+  }
+
+  sampleBiomeTemperatures(
+    target: Float64Array | null,
+    originX: number,
+    originZ: number,
+    width: number,
+    depth: number,
+  ): Float64Array {
+    return this.biomeSampler.sampleTemperatures(target, originX + 8, originZ + 8, width, depth);
   }
 
   findSpawnPoint(): [number, number, number] {
@@ -622,7 +634,13 @@ export class TerrainGenerator {
             return;
           }
           const block = blocks[Chunk.getIndex(x, y, z)] as BlockId;
-          if (block !== 0 && block !== 5 && block !== 14 && block !== 15 && block !== 24) {
+          if (
+            block !== 0 &&
+            block !== 5 &&
+            block !== 14 &&
+            block !== 15 &&
+            !isSnowCoverBlock(block)
+          ) {
             return;
           }
         }
@@ -655,14 +673,14 @@ export class TerrainGenerator {
     for (let y = 0; y < height; y += 1) {
       const index = Chunk.getIndex(trunkX, trunkY + y, trunkZ);
       const block = blocks[index] as BlockId;
-      if (block === 0 || block === 5 || block === 14 || block === 15 || block === 24) {
+      if (block === 0 || block === 5 || block === 14 || block === 15 || isSnowCoverBlock(block)) {
         blocks[index] = 4;
       }
     }
   }
 
   private canReplaceForLeaves(block: BlockId): boolean {
-    return block === 0 || block === 5 || block === 14 || block === 15 || block === 24;
+    return block === 0 || block === 5 || block === 14 || block === 15 || isSnowCoverBlock(block);
   }
 
   private populateFlora(
@@ -842,10 +860,10 @@ export class TerrainGenerator {
   private applySnow(coord: ChunkCoord, blocks: Uint8Array): void {
     const originX = chunkOriginX(coord);
     const originZ = chunkOriginZ(coord);
-    this.snowTemperatureBuffer = this.biomeSampler.sampleTemperatures(
+    this.snowTemperatureBuffer = this.sampleBiomeTemperatures(
       this.snowTemperatureBuffer,
-      originX + 8,
-      originZ + 8,
+      originX,
+      originZ,
       CHUNK_WIDTH,
       CHUNK_DEPTH,
     );
@@ -857,10 +875,11 @@ export class TerrainGenerator {
           continue;
         }
 
-        const adjustedTemperature =
-          this.snowTemperatureBuffer[columnIndex(localX, localZ, CHUNK_WIDTH)] -
-          ((topY - SEA_LEVEL) / SEA_LEVEL) * 0.3;
-        if (adjustedTemperature >= WORLDGEN_PROFILE.hydrology.freezeTemperature) {
+        const signedTemperature = getSignedPrecipitationTemperature(
+          this.snowTemperatureBuffer[columnIndex(localX, localZ, CHUNK_WIDTH)],
+          topY,
+        );
+        if (signedTemperature >= 0) {
           continue;
         }
 
@@ -880,13 +899,21 @@ export class TerrainGenerator {
           continue;
         }
 
-        blocks[aboveIndex] = 24;
+        blocks[aboveIndex] = 33;
       }
     }
   }
 
   private canSupportSnow(blockId: BlockId): boolean {
-    return blockId !== 0 && blockId !== 10 && blockId !== 4 && blockId !== 5 && blockId !== 14 && blockId !== 15 && blockId !== 24;
+    return (
+      blockId !== 0 &&
+      blockId !== 10 &&
+      blockId !== 4 &&
+      blockId !== 5 &&
+      blockId !== 14 &&
+      blockId !== 15 &&
+      !isSnowCoverBlock(blockId)
+    );
   }
 
   private computeSurfaceHeights(blocks: Uint8Array): Uint8Array {
@@ -915,7 +942,15 @@ export class TerrainGenerator {
   private getHighestSolidY(blocks: Uint8Array, localX: number, localZ: number): number {
     for (let y = CHUNK_HEIGHT - 1; y >= 0; y -= 1) {
       const block = blocks[Chunk.getIndex(localX, y, localZ)] as BlockId;
-      if (block === 0 || block === 10 || block === 4 || block === 5 || block === 14 || block === 15 || block === 24) {
+      if (
+        block === 0 ||
+        block === 10 ||
+        block === 4 ||
+        block === 5 ||
+        block === 14 ||
+        block === 15 ||
+        isSnowCoverBlock(block)
+      ) {
         continue;
       }
       return y;
@@ -940,7 +975,7 @@ export class TerrainGenerator {
     }
 
     const isSurfaceSlice = localY >= SEA_LEVEL - 1;
-    const shouldFreeze = temperature < WORLDGEN_PROFILE.hydrology.freezeTemperature;
+    const shouldFreeze = getSignedPrecipitationTemperature(temperature, localY) < 0;
     return isSurfaceSlice && shouldFreeze ? 25 : 10;
   }
 

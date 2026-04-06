@@ -65,6 +65,7 @@ const MINECRAFT_TICK_SECONDS = 0.05;
 const tileKeys = [
   'grass_top',
   'grass_side',
+  'grass_side_snowed',
   'dirt',
   'stone',
   'wood_side',
@@ -104,6 +105,9 @@ const BLOCK_TEXTURES: Record<TileKey, TileAssetDefinition> = {
   },
   grass_side: {
     textureUrl: new URL('../../assets/textures/blocks/grass_side.png', import.meta.url).href,
+  },
+  grass_side_snowed: {
+    textureUrl: new URL('../../assets/textures/blocks/grass_side_snowed.png', import.meta.url).href,
   },
   dirt: {
     textureUrl: new URL('../../assets/textures/blocks/dirt.png', import.meta.url).href,

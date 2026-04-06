@@ -41,7 +41,7 @@ describe('RainField helpers', () => {
     expect(other).not.toEqual(first);
   });
 
-  it('updates cached blocking heights when a roof is placed or removed', () => {
+  it('updates cached precipitation surface heights when a roof is placed or removed', () => {
     const world = new World('rain-field-cache');
     world.primeAround(0, 0, 0);
 
@@ -53,19 +53,19 @@ describe('RainField helpers', () => {
       const initialColumn = initial.columns.find((column) => column.worldX === 0 && column.worldZ === 0);
       expect(initialColumn).toBeDefined();
 
-      const baseBlockingY = initialColumn?.blockingY ?? -1;
-      const roofY = Math.min(WORLD_CONFIG.chunkSizeY - 2, baseBlockingY + 8);
+      const baseSurfaceTopY = initialColumn?.surfaceTopY ?? -1;
+      const roofY = Math.min(WORLD_CONFIG.chunkSizeY - 2, Math.floor(baseSurfaceTopY) + 8);
       expect(world.setBlock(0, roofY, 0, 3)).toBe(true);
 
       const withRoof = buildRainChunkCache(world.getChunkByKey('0,0')!, world);
       const roofColumn = withRoof.columns.find((column) => column.worldX === 0 && column.worldZ === 0);
-      expect(roofColumn?.blockingY).toBe(roofY);
+      expect(roofColumn?.surfaceTopY).toBe(roofY + 1);
 
       expect(world.setBlock(0, roofY, 0, 0)).toBe(true);
 
       const restored = buildRainChunkCache(world.getChunkByKey('0,0')!, world);
       const restoredColumn = restored.columns.find((column) => column.worldX === 0 && column.worldZ === 0);
-      expect(restoredColumn?.blockingY).toBe(baseBlockingY);
+      expect(restoredColumn?.surfaceTopY).toBe(baseSurfaceTopY);
     } finally {
       world.dispose();
     }

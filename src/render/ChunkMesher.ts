@@ -1,11 +1,15 @@
 import { BufferGeometry, Float32BufferAttribute } from 'three';
 import type { BlockId } from '../types/blocks';
 import {
+  blocksMovement,
+  getBlockCollisionHeight,
   getBlockDefinition,
+  getSnowCoverLevel,
   getWaterLevel,
+  isFullCubeOccluder,
   isPlantBlock,
-  isSolidBlock,
-  isTransparentBlock,
+  isSnowCoverBlock,
+  isSnowLayerBlock,
   isWaterBlock,
   WATER_FLOW_LEVEL_MAX,
 } from '../world/BlockRegistry';
@@ -258,6 +262,24 @@ export class ChunkMesher {
             continue;
           }
 
+          if (isSnowLayerBlock(blockId)) {
+            ChunkMesher.pushSnowLayerBlock(
+              solidPositions,
+              solidNormals,
+              solidUvs,
+              chunk,
+              world,
+              atlas,
+              originX,
+              originZ,
+              x,
+              y,
+              z,
+              blockId,
+            );
+            continue;
+          }
+
           for (const face of FACES) {
             const neighborX = x + face.normal[0];
             const neighborY = y + face.normal[1];
@@ -281,7 +303,18 @@ export class ChunkMesher {
               continue;
             }
 
-            const textureRect = ChunkMesher.getFaceTextureRect(blockId, face.texture, atlas);
+            const textureRect = ChunkMesher.getFaceTextureRect(
+              blockId,
+              face.texture,
+              atlas,
+              chunk,
+              world,
+              originX,
+              originZ,
+              x,
+              y,
+              z,
+            );
             const faceUvs = [
               [textureRect.u0, textureRect.v1],
               [textureRect.u0, textureRect.v0],
@@ -546,6 +579,168 @@ export class ChunkMesher {
     }
   }
 
+  private static pushSnowLayerBlock(
+    positions: number[],
+    normals: number[],
+    uvs: number[],
+    chunk: Chunk,
+    world: World,
+    atlas: TextureAtlas,
+    originX: number,
+    originZ: number,
+    x: number,
+    y: number,
+    z: number,
+    blockId: BlockId,
+  ): void {
+    const height = getBlockCollisionHeight(blockId);
+    if (height <= 0) {
+      return;
+    }
+
+    const topRect = ChunkMesher.getFaceTextureRect(
+      blockId,
+      'top',
+      atlas,
+      chunk,
+      world,
+      originX,
+      originZ,
+      x,
+      y,
+      z,
+    );
+    const sideRect = ChunkMesher.getFaceTextureRect(
+      blockId,
+      'side',
+      atlas,
+      chunk,
+      world,
+      originX,
+      originZ,
+      x,
+      y,
+      z,
+    );
+    const bottomRect = ChunkMesher.getFaceTextureRect(
+      blockId,
+      'bottom',
+      atlas,
+      chunk,
+      world,
+      originX,
+      originZ,
+      x,
+      y,
+      z,
+    );
+    const aboveId = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y + 1, z);
+    const belowId = ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y - 1, z);
+
+    if (!blocksMovement(aboveId) && !isWaterBlock(aboveId)) {
+      ChunkMesher.pushQuad(
+        positions,
+        normals,
+        uvs,
+        [
+          [x, y + height, z + 1],
+          [x + 1, y + height, z + 1],
+          [x + 1, y + height, z],
+          [x, y + height, z],
+        ],
+        [0, 1, 0],
+        [
+          [topRect.u0, topRect.v1],
+          [topRect.u0, topRect.v0],
+          [topRect.u1, topRect.v0],
+          [topRect.u1, topRect.v1],
+        ],
+      );
+    }
+
+    if (!blocksMovement(belowId) && !isWaterBlock(belowId)) {
+      ChunkMesher.pushQuad(
+        positions,
+        normals,
+        uvs,
+        [
+          [x, y, z],
+          [x + 1, y, z],
+          [x + 1, y, z + 1],
+          [x, y, z + 1],
+        ],
+        [0, -1, 0],
+        [
+          [bottomRect.u0, bottomRect.v1],
+          [bottomRect.u0, bottomRect.v0],
+          [bottomRect.u1, bottomRect.v0],
+          [bottomRect.u1, bottomRect.v1],
+        ],
+      );
+    }
+
+    ChunkMesher.pushSnowLayerSide(
+      positions,
+      normals,
+      uvs,
+      chunk,
+      world,
+      originX,
+      originZ,
+      x,
+      y,
+      z,
+      [1, 0, 0],
+      height,
+      sideRect,
+    );
+    ChunkMesher.pushSnowLayerSide(
+      positions,
+      normals,
+      uvs,
+      chunk,
+      world,
+      originX,
+      originZ,
+      x,
+      y,
+      z,
+      [-1, 0, 0],
+      height,
+      sideRect,
+    );
+    ChunkMesher.pushSnowLayerSide(
+      positions,
+      normals,
+      uvs,
+      chunk,
+      world,
+      originX,
+      originZ,
+      x,
+      y,
+      z,
+      [0, 0, 1],
+      height,
+      sideRect,
+    );
+    ChunkMesher.pushSnowLayerSide(
+      positions,
+      normals,
+      uvs,
+      chunk,
+      world,
+      originX,
+      originZ,
+      x,
+      y,
+      z,
+      [0, 0, -1],
+      height,
+      sideRect,
+    );
+  }
+
   private static computeWaterCornerHeight(
     chunk: Chunk,
     world: World,
@@ -604,12 +799,88 @@ export class ChunkMesher {
     return vBottom + (vTop - vBottom) * clamped;
   }
 
-  private static isOpaqueOccluder(blockId: BlockId): boolean {
-    return (
-      isSolidBlock(blockId) &&
-      !isPlantBlock(blockId) &&
-      !isTransparentBlock(blockId)
+  private static pushSnowLayerSide(
+    positions: number[],
+    normals: number[],
+    uvs: number[],
+    chunk: Chunk,
+    world: World,
+    originX: number,
+    originZ: number,
+    x: number,
+    y: number,
+    z: number,
+    normal: [number, number, number],
+    height: number,
+    rect: Rect,
+  ): void {
+    const neighborId = ChunkMesher.getBlockAt(
+      chunk,
+      world,
+      originX,
+      originZ,
+      x + normal[0],
+      y + normal[1],
+      z + normal[2],
     );
+    if (isFullCubeOccluder(neighborId) || (normal[1] === 0 && getSnowCoverLevel(neighborId) === 8)) {
+      return;
+    }
+
+    const neighborHeight = isSnowLayerBlock(neighborId) ? getBlockCollisionHeight(neighborId) : 0;
+    if (neighborHeight >= height - 0.0001) {
+      return;
+    }
+
+    const bottomHeight = Math.max(0, neighborHeight);
+    let corners: Array<[number, number, number]>;
+    if (normal[0] > 0) {
+      corners = [
+        [x + 1, y + bottomHeight, z],
+        [x + 1, y + height, z],
+        [x + 1, y + height, z + 1],
+        [x + 1, y + bottomHeight, z + 1],
+      ];
+    } else if (normal[0] < 0) {
+      corners = [
+        [x, y + bottomHeight, z + 1],
+        [x, y + height, z + 1],
+        [x, y + height, z],
+        [x, y + bottomHeight, z],
+      ];
+    } else if (normal[2] > 0) {
+      corners = [
+        [x + 1, y + bottomHeight, z + 1],
+        [x + 1, y + height, z + 1],
+        [x, y + height, z + 1],
+        [x, y + bottomHeight, z + 1],
+      ];
+    } else {
+      corners = [
+        [x, y + bottomHeight, z],
+        [x, y + height, z],
+        [x + 1, y + height, z],
+        [x + 1, y + bottomHeight, z],
+      ];
+    }
+
+    ChunkMesher.pushQuad(
+      positions,
+      normals,
+      uvs,
+      corners,
+      normal,
+      [
+        [rect.u0, rect.v1],
+        [rect.u0, ChunkMesher.mapSideV(rect.v0, rect.v1, height)],
+        [rect.u1, ChunkMesher.mapSideV(rect.v0, rect.v1, height)],
+        [rect.u1, rect.v1],
+      ],
+    );
+  }
+
+  private static isOpaqueOccluder(blockId: BlockId): boolean {
+    return isFullCubeOccluder(blockId);
   }
 
   private static shouldRenderSharedLeafFace(
@@ -736,7 +1007,23 @@ export class ChunkMesher {
     blockId: BlockId,
     face: 'top' | 'bottom' | 'side',
     atlas: TextureAtlas,
+    chunk?: Chunk,
+    world?: World,
+    originX = 0,
+    originZ = 0,
+    x = 0,
+    y = 0,
+    z = 0,
   ) {
+    if (
+      blockId === 1 &&
+      face === 'side' &&
+      chunk &&
+      world &&
+      isSnowCoverBlock(ChunkMesher.getBlockAt(chunk, world, originX, originZ, x, y + 1, z))
+    ) {
+      return atlas.getTileRect('grass_side_snowed');
+    }
     const definition = getBlockDefinition(blockId);
     if (face === 'top') {
       return atlas.getTileRect(definition.textureTop ?? definition.textureSide ?? 'dirt');

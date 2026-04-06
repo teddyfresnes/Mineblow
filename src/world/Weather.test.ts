@@ -7,12 +7,16 @@ import {
 } from './Weather';
 
 describe('Weather', () => {
-  it('only moves to adjacent presets in the weather chain', () => {
+  it('keeps common presets adjacent while using rare snow transition rules', () => {
     expect(pickNextWeatherPreset('clear', () => 0.05)).toBe('clear');
     expect(pickNextWeatherPreset('overcast', () => 0.1)).toBe('cloudy_heavy');
     expect(pickNextWeatherPreset('overcast', () => 0.5)).toBe('overcast');
     expect(pickNextWeatherPreset('overcast', () => 0.9)).toBe('rain');
     expect(pickNextWeatherPreset('rain', () => 0.9)).toBe('rain_light');
+    expect(pickNextWeatherPreset('rain_heavy', () => 0.95)).toBe('snow');
+    expect(pickNextWeatherPreset('snow', () => 0.95)).toBe('snow_heavy');
+    expect(pickNextWeatherPreset('snow_heavy', () => 0.99)).toBe('storm');
+    expect(pickNextWeatherPreset('storm', () => 0.03)).toBe('snow_heavy');
     expect(pickNextWeatherPreset('storm', () => 0.95)).toBe('storm');
   });
 
@@ -38,11 +42,14 @@ describe('Weather', () => {
     expect(visual.rainIntensity).toBeCloseTo(
       (previous.rainIntensity + current.rainIntensity) / 2,
     );
+    expect(visual.temperatureOffset).toBeCloseTo(
+      (previous.temperatureOffset + current.temperatureOffset) / 2,
+    );
     expect(visual.windOffsetX).toBe(12);
     expect(visual.windOffsetZ).toBe(-4);
   });
 
-  it('keeps rain presets ordered from drizzle to storm', () => {
+  it('keeps precipitation intensity ordered and snow presets colder than rain', () => {
     expect(getWeatherProfile('rain').rainIntensity).toBeLessThan(
       getWeatherProfile('rain_light').rainIntensity,
     );
@@ -51,6 +58,12 @@ describe('Weather', () => {
     );
     expect(getWeatherProfile('rain_heavy').rainIntensity).toBeLessThan(
       getWeatherProfile('storm').rainIntensity,
+    );
+    expect(getWeatherProfile('snow').temperatureOffset).toBeLessThan(
+      getWeatherProfile('rain_heavy').temperatureOffset,
+    );
+    expect(getWeatherProfile('snow_heavy').temperatureOffset).toBeLessThan(
+      getWeatherProfile('snow').temperatureOffset,
     );
   });
 });

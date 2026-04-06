@@ -56,14 +56,18 @@ import {
 } from '../world/Weather';
 import { WeatherController } from '../world/WeatherController';
 import {
+  blocksMovement,
+  getBlockCollisionHeight,
   getWaterLevel,
+  getSnowCoverLevel,
   getMineDurationMs,
   getUiBlockColor,
   isMineableBlock,
   isPlaceableBlock,
-  isSolidBlock,
+  isSnowCoverBlock,
   isWaterBlock,
   isWaterSource,
+  toSnowCoverBlockId,
 } from '../world/BlockRegistry';
 import { VoxelRaycaster } from '../world/VoxelRaycaster';
 import { World } from '../world/World';
@@ -936,6 +940,7 @@ export class Game {
     world.enqueueStreamingAround(player.getPosition()[0], player.getPosition()[2]);
     world.processGenerationBudget();
     world.tickFluids(dt);
+    world.tickWeatherAccumulation(dt, this.weatherController.getVisualState());
     this.syncChunkMeshes();
 
     this.syncHotbarHud();
@@ -1546,28 +1551,36 @@ export class Game {
         return;
       }
 
-      const targetPlacementBlock = world.getBlock(
-        this.targetHit.placeWorldX,
-        this.targetHit.placeWorldY,
-        this.targetHit.placeWorldZ,
-      );
-      const canReplaceTargetBlock =
-        targetPlacementBlock === 0 || isWaterBlock(targetPlacementBlock);
       const selectedBlock = inventory.getSelectedBlock();
+      const snowPlacement =
+        selectedBlock === null
+          ? null
+          : this.resolveSnowCoverPlacement(world, this.targetHit, selectedBlock);
+      const placementX = snowPlacement?.worldX ?? this.targetHit.placeWorldX;
+      const placementY = snowPlacement?.worldY ?? this.targetHit.placeWorldY;
+      const placementZ = snowPlacement?.worldZ ?? this.targetHit.placeWorldZ;
+      const targetPlacementBlock = world.getBlock(placementX, placementY, placementZ);
+      const canReplaceTargetBlock =
+        snowPlacement !== null ||
+        targetPlacementBlock === 0 ||
+        isWaterBlock(targetPlacementBlock);
+      const placedBlockId = snowPlacement?.blockId ?? selectedBlock;
       if (
         selectedBlock !== null &&
+        placedBlockId !== null &&
         isPlaceableBlock(selectedBlock) &&
         canReplaceTargetBlock &&
         player.canOccupyBlock(
-          this.targetHit.placeWorldX,
-          this.targetHit.placeWorldY,
-          this.targetHit.placeWorldZ,
+          placementX,
+          placementY,
+          placementZ,
+          getBlockCollisionHeight(placedBlockId),
         ) &&
         world.setBlock(
-          this.targetHit.placeWorldX,
-          this.targetHit.placeWorldY,
-          this.targetHit.placeWorldZ,
-          selectedBlock,
+          placementX,
+          placementY,
+          placementZ,
+          placedBlockId,
         )
       ) {
         this.renderer.triggerFirstPersonAction(1.05);
@@ -1917,9 +1930,17 @@ export class Game {
       [x + 0.28, z + 0.28],
     ];
 
-    const belowSolid = samplePoints.some(([sampleX, sampleZ]) =>
-      isSolidBlock(world.getBlock(Math.floor(sampleX), belowY, Math.floor(sampleZ))),
-    );
+    const belowSolid = samplePoints.some(([sampleX, sampleZ]) => {
+      const blockX = Math.floor(sampleX);
+      const blockZ = Math.floor(sampleZ);
+      const blockId = world.getBlock(blockX, belowY, blockZ);
+      if (!blocksMovement(blockId)) {
+        return false;
+      }
+
+      const supportTop = belowY + getBlockCollisionHeight(blockId);
+      return y - 0.08 <= supportTop && y + 0.08 >= supportTop;
+    });
     if (!belowSolid) {
       return false;
     }
@@ -2136,8 +2157,9 @@ export class Game {
 
       const belowY = Math.floor(item.position[1] - 0.14);
       const belowId = world.getBlock(Math.floor(item.position[0]), belowY, Math.floor(item.position[2]));
-      if (isSolidBlock(belowId) && item.velocity[1] <= 0) {
-        item.position[1] = belowY + 1 + 0.14;
+      const belowHeight = getBlockCollisionHeight(belowId);
+      if (blocksMovement(belowId) && item.velocity[1] <= 0) {
+        item.position[1] = belowY + belowHeight + 0.14;
         item.velocity[1] = inWater ? -0.2 : 0;
         item.velocity[0] *= 0.72;
         item.velocity[2] *= 0.72;
@@ -2288,6 +2310,35 @@ export class Game {
     const level = Math.floor(this.session.worldStats.blocksMined / blocksForLevel) + 1;
     const progress = (this.session.worldStats.blocksMined % blocksForLevel) / blocksForLevel;
     this.hud.setLevel(level, progress);
+  }
+
+  private resolveSnowCoverPlacement(
+    world: World,
+    hit: VoxelHit,
+    selectedBlock: BlockId,
+  ): { worldX: number; worldY: number; worldZ: number; blockId: BlockId } | null {
+    const selectedSnowLevel = getSnowCoverLevel(selectedBlock);
+    const targetSnowLevel = getSnowCoverLevel(hit.blockId);
+    if (selectedSnowLevel === null || targetSnowLevel === null) {
+      return null;
+    }
+
+    const combinedLevel = targetSnowLevel + selectedSnowLevel;
+    if (combinedLevel > 8) {
+      return null;
+    }
+
+    const existingBlock = world.getBlock(hit.blockWorldX, hit.blockWorldY, hit.blockWorldZ);
+    if (!isSnowCoverBlock(existingBlock)) {
+      return null;
+    }
+
+    return {
+      worldX: hit.blockWorldX,
+      worldY: hit.blockWorldY,
+      worldZ: hit.blockWorldZ,
+      blockId: toSnowCoverBlockId(combinedLevel),
+    };
   }
 
   private buildEnvironmentState(): WorldEnvironmentState {

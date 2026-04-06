@@ -6,6 +6,8 @@ export const WEATHER_PRESET_CHAIN = [
   'rain',
   'rain_light',
   'rain_heavy',
+  'snow',
+  'snow_heavy',
   'storm',
 ] as const;
 
@@ -58,6 +60,7 @@ export interface WeatherVisualState {
   fogDimming: number;
   ambientDimming: number;
   rainIntensity: number;
+  temperatureOffset: number;
   skyPreset: WeatherSkyPreset;
 }
 

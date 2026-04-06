@@ -10,6 +10,7 @@ export const WATER_SOURCE_BLOCK_ID = 10 as const;
 export const WATER_FLOW_LEVEL_MIN = 1 as const;
 export const WATER_FLOW_LEVEL_MAX = 7 as const;
 const WATER_FLOW_BLOCK_IDS = [26, 27, 28, 29, 30, 31, 32] as const;
+const SNOW_LAYER_BLOCK_IDS = [33, 34, 35, 36, 37, 38, 39] as const;
 
 const definitions: Record<BlockKey, InternalBlockDefinition> = {
   air: {
@@ -460,10 +461,148 @@ const definitions: Record<BlockKey, InternalBlockDefinition> = {
     liquid: true,
     uiColor: '#4f89d6',
   },
+  snow_layer_1: {
+    id: 33,
+    key: 'snow_layer_1',
+    label: 'Couche de neige',
+    solid: true,
+    mineable: true,
+    placeable: true,
+    mineDurationMs: 140,
+    textureTop: 'snow',
+    textureSide: 'snow',
+    textureBottom: 'snow',
+    transparent: true,
+    collisionHeight: 1 / 8,
+    fullCubeOccluder: false,
+    uiColor: '#e8edf3',
+  },
+  snow_layer_2: {
+    id: 34,
+    key: 'snow_layer_2',
+    label: 'Couche de neige',
+    solid: true,
+    mineable: true,
+    placeable: true,
+    mineDurationMs: 150,
+    textureTop: 'snow',
+    textureSide: 'snow',
+    textureBottom: 'snow',
+    transparent: true,
+    collisionHeight: 2 / 8,
+    fullCubeOccluder: false,
+    uiColor: '#e8edf3',
+  },
+  snow_layer_3: {
+    id: 35,
+    key: 'snow_layer_3',
+    label: 'Couche de neige',
+    solid: true,
+    mineable: true,
+    placeable: true,
+    mineDurationMs: 160,
+    textureTop: 'snow',
+    textureSide: 'snow',
+    textureBottom: 'snow',
+    transparent: true,
+    collisionHeight: 3 / 8,
+    fullCubeOccluder: false,
+    uiColor: '#e8edf3',
+  },
+  snow_layer_4: {
+    id: 36,
+    key: 'snow_layer_4',
+    label: 'Couche de neige',
+    solid: true,
+    mineable: true,
+    placeable: true,
+    mineDurationMs: 170,
+    textureTop: 'snow',
+    textureSide: 'snow',
+    textureBottom: 'snow',
+    transparent: true,
+    collisionHeight: 4 / 8,
+    fullCubeOccluder: false,
+    uiColor: '#e8edf3',
+  },
+  snow_layer_5: {
+    id: 37,
+    key: 'snow_layer_5',
+    label: 'Couche de neige',
+    solid: true,
+    mineable: true,
+    placeable: true,
+    mineDurationMs: 180,
+    textureTop: 'snow',
+    textureSide: 'snow',
+    textureBottom: 'snow',
+    transparent: true,
+    collisionHeight: 5 / 8,
+    fullCubeOccluder: false,
+    uiColor: '#e8edf3',
+  },
+  snow_layer_6: {
+    id: 38,
+    key: 'snow_layer_6',
+    label: 'Couche de neige',
+    solid: true,
+    mineable: true,
+    placeable: true,
+    mineDurationMs: 190,
+    textureTop: 'snow',
+    textureSide: 'snow',
+    textureBottom: 'snow',
+    transparent: true,
+    collisionHeight: 6 / 8,
+    fullCubeOccluder: false,
+    uiColor: '#e8edf3',
+  },
+  snow_layer_7: {
+    id: 39,
+    key: 'snow_layer_7',
+    label: 'Couche de neige',
+    solid: true,
+    mineable: true,
+    placeable: true,
+    mineDurationMs: 200,
+    textureTop: 'snow',
+    textureSide: 'snow',
+    textureBottom: 'snow',
+    transparent: true,
+    collisionHeight: 7 / 8,
+    fullCubeOccluder: false,
+    uiColor: '#e8edf3',
+  },
+};
+
+const normalizeDefinition = (definition: InternalBlockDefinition): InternalBlockDefinition => {
+  const collisionHeight =
+    typeof definition.collisionHeight === 'number'
+      ? Math.max(0, Math.min(1, definition.collisionHeight))
+      : definition.liquid === true || definition.plant === true || definition.solid === false
+        ? 0
+        : 1;
+  const fullCubeOccluder =
+    typeof definition.fullCubeOccluder === 'boolean'
+      ? definition.fullCubeOccluder
+      : definition.solid === true &&
+        definition.transparent !== true &&
+        definition.liquid !== true &&
+        definition.plant !== true &&
+        collisionHeight >= 1;
+
+  return {
+    ...definition,
+    collisionHeight,
+    fullCubeOccluder,
+  };
 };
 
 const byId = new Map<BlockId, InternalBlockDefinition>(
-  Object.values(definitions).map((definition) => [definition.id, definition]),
+  Object.values(definitions).map((definition) => {
+    const normalized = normalizeDefinition(definition);
+    return [normalized.id, normalized];
+  }),
 );
 
 export const getBlockDefinition = (blockId: BlockId): BlockDefinition => {
@@ -490,6 +629,14 @@ export const getUiBlockColor = (blockId: BlockId | null): string =>
 export const getMineDurationMs = (blockId: BlockId): number => getBlockDefinition(blockId).mineDurationMs;
 
 export const isSolidBlock = (blockId: BlockId): boolean => getBlockDefinition(blockId).solid;
+
+export const getBlockCollisionHeight = (blockId: BlockId): number =>
+  getBlockDefinition(blockId).collisionHeight ?? 0;
+
+export const blocksMovement = (blockId: BlockId): boolean => getBlockCollisionHeight(blockId) > 0;
+
+export const isFullCubeOccluder = (blockId: BlockId): boolean =>
+  getBlockDefinition(blockId).fullCubeOccluder === true;
 
 export const isMineableBlock = (blockId: BlockId): boolean => getBlockDefinition(blockId).mineable;
 
@@ -522,3 +669,26 @@ export const isTransparentBlock = (blockId: BlockId): boolean =>
   getBlockDefinition(blockId).transparent === true;
 
 export const isPlantBlock = (blockId: BlockId): boolean => getBlockDefinition(blockId).plant === true;
+
+export const isSnowLayerBlock = (blockId: BlockId): boolean =>
+  SNOW_LAYER_BLOCK_IDS.includes(blockId as (typeof SNOW_LAYER_BLOCK_IDS)[number]);
+
+export const isSnowCoverBlock = (blockId: BlockId): boolean => blockId === 24 || isSnowLayerBlock(blockId);
+
+export const getSnowCoverLevel = (blockId: BlockId): number | null => {
+  if (blockId === 24) {
+    return 8;
+  }
+  if (!isSnowLayerBlock(blockId)) {
+    return null;
+  }
+  return blockId - SNOW_LAYER_BLOCK_IDS[0] + 1;
+};
+
+export const toSnowCoverBlockId = (level: number): BlockId => {
+  const clamped = Math.max(1, Math.min(8, Math.floor(level)));
+  if (clamped >= 8) {
+    return 24;
+  }
+  return SNOW_LAYER_BLOCK_IDS[clamped - 1] as BlockId;
+};

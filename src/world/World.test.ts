@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WORLD_CONFIG } from '../game/Config';
+import { buildWeatherVisualState } from './Weather';
 import { World } from './World';
 
 describe('World diffs', () => {
@@ -51,6 +52,53 @@ describe('World diffs', () => {
       world.enqueueStreamingAround(0.8, 0.8);
 
       expect(dropStaleSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      world.dispose();
+    }
+  });
+
+  it('accumulates snow layers on exposed loaded surfaces during snowy weather', () => {
+    const world = new World('weather-accumulation');
+    world.primeAround(0, 0, 0);
+
+    try {
+      for (let x = 0; x < WORLD_CONFIG.chunkSizeX; x += 1) {
+        for (let z = 0; z < WORLD_CONFIG.chunkSizeZ; z += 1) {
+          world.setBlock(x, 90, z, 3);
+          for (let y = 91; y < WORLD_CONFIG.chunkSizeY; y += 1) {
+            world.setBlock(x, y, z, 0);
+          }
+        }
+      }
+
+      const weather = {
+        ...buildWeatherVisualState(
+          {
+            preset: 'snow_heavy',
+            previousPreset: null,
+            presetElapsedMs: 0,
+            presetDurationMs: 1,
+            transitionMs: 0,
+            windOffsetX: 0,
+            windOffsetZ: 0,
+          },
+          'manual',
+        ),
+        temperatureOffset: -1,
+      };
+
+      world.tickWeatherAccumulation(1.25, weather);
+
+      let accumulatedColumns = 0;
+      for (let x = 0; x < WORLD_CONFIG.chunkSizeX; x += 1) {
+        for (let z = 0; z < WORLD_CONFIG.chunkSizeZ; z += 1) {
+          if (world.getBlock(x, 91, z) === 33) {
+            accumulatedColumns += 1;
+          }
+        }
+      }
+
+      expect(accumulatedColumns).toBeGreaterThan(0);
     } finally {
       world.dispose();
     }

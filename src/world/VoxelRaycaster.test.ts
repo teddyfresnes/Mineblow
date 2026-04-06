@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toSnowCoverBlockId } from './BlockRegistry';
 import { VoxelRaycaster } from './VoxelRaycaster';
 import { World } from './World';
 
@@ -47,5 +48,26 @@ describe('VoxelRaycaster', () => {
     expect(hit?.blockId).toBe(3);
     expect(hit?.blockWorldY).toBe(79);
     expect(hit?.placeWorldY).toBe(80);
+  });
+
+  it('hits partial snow layers at their slab height', () => {
+    const world = new World('raycast-snow-layer');
+    world.primeAround(0, 0, 0);
+    world.setBlock(4, 90, 4, 3);
+    world.setBlock(4, 91, 4, toSnowCoverBlockId(4));
+    world.setBlock(4, 92, 4, 0);
+    world.setBlock(4, 93, 4, 0);
+
+    const hit = VoxelRaycaster.cast(
+      world,
+      { x: 4.5, y: 93, z: 4.5 },
+      { x: 0, y: -1, z: 0 },
+      10,
+    );
+
+    expect(hit).not.toBeNull();
+    expect(hit?.blockWorldY).toBe(91);
+    expect(hit?.distance).toBeCloseTo(1.5, 6);
+    expect(hit?.placeWorldY).toBe(92);
   });
 });

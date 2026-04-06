@@ -44,6 +44,7 @@ describe('RainField integration', () => {
         fogDimming: profile.fogDimming,
         ambientDimming: profile.ambientDimming,
         rainIntensity: profile.rainIntensity,
+        temperatureOffset: profile.temperatureOffset,
         skyPreset: 'auto',
       });
 
@@ -56,13 +57,67 @@ describe('RainField integration', () => {
       rain.update(1 / 60, camera, world);
 
       const rainMesh = rain.group.children[0] as Mesh;
-      const splashMesh = rain.group.children[1] as Mesh;
+      const splashMesh = rain.group.children[2] as Mesh;
       const rainGeometry = rainMesh.geometry as InstancedBufferGeometry;
       const splashGeometry = splashMesh.geometry as InstancedBufferGeometry;
 
       expect(rainMesh.visible).toBe(true);
       expect(rainGeometry.instanceCount).toBeGreaterThan(0);
       expect(splashGeometry.instanceCount).toBeGreaterThan(0);
+    } finally {
+      world.dispose();
+    }
+  });
+
+  it('renders snow columns without spawning rain splashes when the local temperature stays below zero', () => {
+    const world = new World('rain-field-snow-render');
+    world.primeAround(0, 0, 1);
+
+    try {
+      expect(world.setBlock(0, 96, 0, 3)).toBe(true);
+
+      const rain = new RainField();
+      const profile = getWeatherProfile('snow_heavy');
+      rain.setWeatherState({
+        preset: 'snow_heavy',
+        previousPreset: null,
+        transitionAlpha: 1,
+        mode: 'manual',
+        cloudCoverage: profile.cloudCoverage,
+        cloudDensity: profile.cloudDensity,
+        cloudThickness: profile.cloudThickness,
+        cloudSharpness: profile.cloudSharpness,
+        cloudGrayness: profile.cloudGrayness,
+        cloudOpacity: profile.cloudOpacity,
+        windOffsetX: 0,
+        windOffsetZ: 0,
+        windSpeed: profile.windSpeed,
+        skyGrayness: profile.skyGrayness,
+        skyBrightness: profile.skyBrightness,
+        sunVisibility: profile.sunVisibility,
+        fogDimming: profile.fogDimming,
+        ambientDimming: profile.ambientDimming,
+        rainIntensity: profile.rainIntensity,
+        temperatureOffset: -1,
+        skyPreset: 'auto',
+      });
+
+      const camera = new PerspectiveCamera(75, 1, 0.1, 500);
+      camera.position.set(0.5, 100, 0.5);
+      camera.lookAt(new Vector3(0.5, 98, -10));
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld();
+
+      rain.update(1 / 60, camera, world);
+
+      const snowMesh = rain.group.children[1] as Mesh;
+      const splashMesh = rain.group.children[2] as Mesh;
+      const snowGeometry = snowMesh.geometry as InstancedBufferGeometry;
+      const splashGeometry = splashMesh.geometry as InstancedBufferGeometry;
+
+      expect(snowMesh.visible).toBe(true);
+      expect(snowGeometry.instanceCount).toBeGreaterThan(0);
+      expect(splashGeometry.instanceCount).toBe(0);
     } finally {
       world.dispose();
     }
