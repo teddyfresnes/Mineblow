@@ -39,6 +39,10 @@ import { ChatOverlay, type ChatInputMode } from '../ui/ChatOverlay';
 import { DebugOverlay } from '../ui/DebugOverlay';
 import { Hud, type HotbarInteractEvent } from '../ui/Hud';
 import {
+  autocompleteChatCommand,
+  type ChatCommandAutocompleteState,
+} from './ChatCommandAutocomplete';
+import {
   InventoryScreen,
   type InventoryScreenState,
   type SlotInteractEvent,
@@ -190,6 +194,7 @@ export class Game {
   private timeOfDay = 0;
   private moonPhase = 0;
   private restorePointerLockAfterChat = false;
+  private chatAutocompleteState: ChatCommandAutocompleteState | null = null;
 
   constructor(private readonly root: HTMLElement) {
     this.shell.className = 'mineblow-shell';
@@ -244,6 +249,8 @@ export class Game {
       onCancel: () => {
         this.closeChat();
       },
+      onAutocomplete: (mode, value, selectionStart, selectionEnd, direction) =>
+        this.handleChatAutocomplete(mode, value, selectionStart, selectionEnd, direction),
     });
     this.chat.setVisible(false);
     this.debugOverlay = new DebugOverlay(this.shell);
@@ -979,6 +986,7 @@ export class Game {
       return;
     }
 
+    this.chatAutocompleteState = null;
     this.restorePointerLockAfterChat = this.input.isPointerLocked();
     if (this.input.isPointerLocked()) {
       this.input.exitPointerLock();
@@ -990,6 +998,7 @@ export class Game {
 
   private closeChat(restorePointerLock = true): void {
     if (!this.chat.isOpen()) {
+      this.chatAutocompleteState = null;
       this.restorePointerLockAfterChat = false;
       return;
     }
@@ -1000,6 +1009,7 @@ export class Game {
       !!this.session &&
       !this.menu.isVisible() &&
       !this.inventoryScreen.isVisible();
+    this.chatAutocompleteState = null;
     this.chat.closeComposer();
     this.restorePointerLockAfterChat = false;
     this.input.clearInputState();
@@ -1012,6 +1022,7 @@ export class Game {
 
   private handleChatSubmit(mode: ChatInputMode, value: string): void {
     void mode;
+    this.chatAutocompleteState = null;
     if (value.startsWith('/')) {
       this.chat.addCommandMessage(value);
       this.executeChatCommand(value.slice(1).trim());
@@ -1020,6 +1031,38 @@ export class Game {
     }
 
     this.closeChat();
+  }
+
+  private handleChatAutocomplete(
+    mode: ChatInputMode,
+    value: string,
+    selectionStart: number,
+    selectionEnd: number,
+    direction: 1 | -1,
+  ): { value: string; selectionStart: number; selectionEnd: number } | null {
+    void mode;
+    void selectionEnd;
+    if (!value.startsWith('/')) {
+      this.chatAutocompleteState = null;
+      return null;
+    }
+
+    const result = autocompleteChatCommand(
+      value,
+      selectionStart,
+      this.chatAutocompleteState,
+      direction,
+    );
+    this.chatAutocompleteState = result?.state ?? null;
+    if (!result) {
+      return null;
+    }
+
+    return {
+      value: result.value,
+      selectionStart: result.selectionStart,
+      selectionEnd: result.selectionEnd,
+    };
   }
 
   private executeChatCommand(rawCommand: string): void {

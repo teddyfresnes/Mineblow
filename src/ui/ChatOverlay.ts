@@ -12,6 +12,17 @@ interface ChatEntryRecord {
 interface ChatOverlayHandlers {
   onSubmit?: (mode: ChatInputMode, value: string) => void;
   onCancel?: () => void;
+  onAutocomplete?: (
+    mode: ChatInputMode,
+    value: string,
+    selectionStart: number,
+    selectionEnd: number,
+    direction: 1 | -1,
+  ) => {
+    value: string;
+    selectionStart: number;
+    selectionEnd: number;
+  } | null;
 }
 
 const CHAT_ENTRY_VISIBLE_MS = 6000;
@@ -81,6 +92,26 @@ export class ChatOverlay {
         event.stopPropagation();
         this.input.value = nextValue;
         this.moveCursorToEnd();
+        return;
+      }
+
+      if (event.code === 'Tab') {
+        event.preventDefault();
+        event.stopPropagation();
+        const selectionStart = this.input.selectionStart ?? this.input.value.length;
+        const selectionEnd = this.input.selectionEnd ?? selectionStart;
+        const result = this.handlers.onAutocomplete?.(
+          this.mode,
+          this.input.value,
+          selectionStart,
+          selectionEnd,
+          event.shiftKey ? -1 : 1,
+        );
+        if (!result) {
+          return;
+        }
+        this.input.value = result.value;
+        this.input.setSelectionRange(result.selectionStart, result.selectionEnd);
         return;
       }
 

@@ -55,7 +55,7 @@ const SPLASH_HEIGHT_OFFSET = 0.035;
 const SPLASH_OPACITY_MIN = 0.16;
 const SPLASH_OPACITY_MAX = 0.34;
 const SPLASH_COLOR = new Color(44 / 255, 95 / 255, 111 / 255);
-const SPLASH_DAY_COLOR = new Color(88 / 255, 152 / 255, 176 / 255);
+const SPLASH_DAY_COLOR = new Color(74 / 255, 137 / 255, 160 / 255);
 const SPLASH_MIN_RENDER_RADIUS = 2;
 const SPLASH_MAX_RENDER_RADIUS = 5;
 const CACHE_PRUNE_INTERVAL_FRAMES = 60;
@@ -690,9 +690,9 @@ export class RainField {
     this.rainMesh.visible = rainCount > 0;
     this.splashGeometry.instanceCount = splashCount;
     this.splashMesh.visible = splashCount > 0;
-    const splashDayBoost =
-      clamp01(this.daylight) *
-      lerp(0.92, 1.14, clamp01(this.weather.skyBrightness));
+    const splashDayBoost = clamp01(
+      clamp01(this.daylight) * lerp(0.92, 1.04, clamp01(this.weather.skyBrightness)),
+    );
 
     this.rainMaterial.uniforms.uOpacity.value = lerp(
       RAIN_BASE_OPACITY_MIN,
@@ -703,10 +703,10 @@ export class RainField {
       SPLASH_OPACITY_MIN,
       SPLASH_OPACITY_MAX,
       intensity,
-    ) * lerp(1, 1.55, splashDayBoost);
+    ) * lerp(1, 1.38, splashDayBoost);
     (
       this.splashMaterial.uniforms.uColor as { value: Color }
-    ).value.copy(SPLASH_COLOR).lerp(SPLASH_DAY_COLOR, splashDayBoost * 0.9);
+    ).value.copy(SPLASH_COLOR).lerp(SPLASH_DAY_COLOR, splashDayBoost * 0.82);
     this.splashMaterial.uniforms.uTime.value = this.elapsedSeconds;
 
     (
