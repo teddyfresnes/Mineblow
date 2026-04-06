@@ -128,6 +128,7 @@ export class VoxelCloudLayer {
         opacity: 0,
         depthWrite: false,
         flatShading: true,
+        fog: false,
       });
       const mesh = new InstancedMesh(this.geometry, material, MAX_BOXES_PER_PATCH);
       mesh.count = 0;
