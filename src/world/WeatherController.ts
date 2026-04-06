@@ -10,9 +10,9 @@ import {
   advanceWeatherState,
   buildWeatherVisualState,
   createInitialWeatherState,
-  forceWeatherPreset,
   normalizeWeatherOverrides,
   normalizeWeatherState,
+  retimeWeatherPreset,
 } from './Weather';
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
@@ -51,7 +51,7 @@ export class WeatherController {
 
   setPreset(preset: WeatherPreset): void {
     this.mode = 'manual';
-    forceWeatherPreset(this.state, preset, this.random);
+    retimeWeatherPreset(this.state, preset, this.random);
   }
 
   setCloudCoverage(value: number | null): void {

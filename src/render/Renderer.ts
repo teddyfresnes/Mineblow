@@ -76,7 +76,7 @@ const AIR_FOG_NEAR_NIGHT = 42;
 const AIR_FOG_FAR_NIGHT = 132;
 const AIR_EXPOSURE_NIGHT = 0.46;
 const TWILIGHT_FOG_COLOR = '#d38d6a';
-const NIGHT_FOG_COLOR = '#101a29';
+const NIGHT_FOG_COLOR = '#0a1018';
 const TWILIGHT_BACKGROUND_COLOR = '#d79d76';
 const NIGHT_BACKGROUND_COLOR = '#060b14';
 const OVERCAST_BACKGROUND_COLOR = '#aab4bf';
@@ -239,7 +239,6 @@ export class Renderer {
   private readonly chunkEdgeFadeEnabledUniform = {
     value: WORLD_CONFIG.preloadRadius > WORLD_CONFIG.loadRadius ? 1 : 0,
   };
-  private readonly chunkEdgeFadeStrengthUniform = { value: 0.82 };
   private readonly skyTopColor = new Color(DAY_SKY_TOP_COLOR);
   private readonly skyHorizonColor = new Color(DAY_SKY_HORIZON_COLOR);
   private readonly skyBottomColor = new Color(DAY_SKY_BOTTOM_COLOR);
@@ -766,16 +765,6 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
 
   private applyViewAtmosphere(): void {
     if (!this.underwaterEnabled) {
-      const daylightFactor = clamp01(
-        (this.airExposure - AIR_EXPOSURE_NIGHT) / Math.max(0.0001, AIR_EXPOSURE - AIR_EXPOSURE_NIGHT),
-      );
-      const stormDarkening = clamp01(
-        this.weatherState.fogDimming * 0.7 +
-          this.weatherState.skyGrayness * 0.25 +
-          (1 - this.weatherState.sunVisibility) * 0.1,
-      );
-      const discreetness = clamp01((1 - daylightFactor) * 0.75 + stormDarkening * 0.65);
-
       this.sceneFog.color.copy(this.currentAirFogColor);
       this.sceneFog.near = this.airFogNear;
       this.sceneFog.far = this.airFogFar;
@@ -785,10 +774,7 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
       this.lights.ambient.intensity = this.airAmbientIntensity;
       this.lights.skyBounce.intensity = this.airSkyBounceIntensity;
       this.lights.sun.intensity = this.airSunIntensity;
-      this.chunkEdgeFadeColor
-        .copy(this.currentAirFogColor)
-        .lerp(this.airBackgroundColor, lerp(0.28, 0.06, discreetness));
-      this.chunkEdgeFadeStrengthUniform.value = lerp(0.82, 0.38, discreetness);
+      this.chunkEdgeFadeColor.copy(this.airBackgroundColor);
       return;
     }
 
@@ -815,7 +801,6 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.renderer.setClearColor(this.sceneFog.color);
     this.scene.background = this.sceneFog.color;
     this.chunkEdgeFadeColor.copy(this.sceneFog.color);
-    this.chunkEdgeFadeStrengthUniform.value = 0.9;
 
     const lightScale = lerp(UNDERWATER_LIGHT_SCALE_SHALLOW, UNDERWATER_LIGHT_SCALE_DEEP, depthRatio);
     this.lights.ambient.intensity = this.airAmbientIntensity * lightScale;
@@ -1069,7 +1054,6 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     shader.uniforms.uChunkEdgeFadeBufferSize = { value: this.chunkEdgeFadeBufferSize };
     shader.uniforms.uChunkEdgeFadeColor = { value: this.chunkEdgeFadeColor };
     shader.uniforms.uChunkEdgeFadeEnabled = this.chunkEdgeFadeEnabledUniform;
-    shader.uniforms.uChunkEdgeFadeStrength = this.chunkEdgeFadeStrengthUniform;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -1094,7 +1078,6 @@ uniform vec2 uChunkEdgeFadeVisibleMax;
 uniform vec2 uChunkEdgeFadeBufferSize;
 uniform vec3 uChunkEdgeFadeColor;
 uniform float uChunkEdgeFadeEnabled;
-uniform float uChunkEdgeFadeStrength;
 varying vec3 vChunkEdgeFadeWorldPosition;
 
 float getChunkEdgeFadeFactor(vec2 worldXZ) {
@@ -1115,7 +1098,7 @@ float getChunkEdgeFadeFactor(vec2 worldXZ) {
         '#include <fog_fragment>',
         `#include <fog_fragment>
 float chunkEdgeFade = getChunkEdgeFadeFactor(vChunkEdgeFadeWorldPosition.xz);
-gl_FragColor.rgb = mix(gl_FragColor.rgb, uChunkEdgeFadeColor, chunkEdgeFade * uChunkEdgeFadeStrength);
+gl_FragColor.rgb = mix(gl_FragColor.rgb, uChunkEdgeFadeColor, chunkEdgeFade);
 `,
       );
   }
