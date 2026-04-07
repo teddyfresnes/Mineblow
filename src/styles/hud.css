@@ -103,7 +103,13 @@
 }
 
 .menu-panel,
-.menu-card,
+.menu-card {
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.18)),
+    url('../../assets/textures/blocks/stone.png');
+  background-size: auto, 64px 64px;
+}
+
 .inventory-panel,
 .inventory-side-card,
 .inventory-board,
@@ -1591,7 +1597,12 @@ body.pointer-cursor-hidden * {
   display: grid;
   gap: 16px;
   padding: 18px;
-  background: rgba(0, 0, 0, 0.72);
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.52), rgba(0, 0, 0, 0.74)),
+    url('../../assets/textures/blocks/stone.png');
+  background-size: auto, 64px 64px;
+  background-repeat: repeat;
+  image-rendering: pixelated;
   border: 2px solid #000;
   box-shadow:
     inset 0 0 0 2px #6f6f6f,
@@ -2344,7 +2355,12 @@ body.pointer-cursor-hidden * {
   display: none;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.8);
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.56), rgba(0, 0, 0, 0.78)),
+    url('../../assets/textures/blocks/stone.png');
+  background-size: auto, 64px 64px;
+  background-repeat: repeat;
+  image-rendering: pixelated;
   pointer-events: auto;
 }
 
@@ -2353,22 +2369,33 @@ body.pointer-cursor-hidden * {
 }
 
 .world-loading-card {
-  min-width: min(320px, calc(100vw - 40px));
-  padding: 18px 20px;
-  border: 2px solid rgba(255, 255, 255, 0.72);
-  background: rgba(6, 10, 14, 0.74);
+  min-width: min(560px, calc(100vw - 40px));
+  min-height: 176px;
+  padding: 28px 24px;
+  border: 2px solid #000;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.52), rgba(0, 0, 0, 0.78)),
+    url('../../assets/textures/blocks/stone.png');
+  background-size: auto, 64px 64px;
+  background-repeat: repeat;
+  image-rendering: pixelated;
   color: #fff;
   display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 10px 14px;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  align-content: center;
+  gap: 12px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  text-align: center;
+  box-shadow:
+    inset 0 0 0 2px #6f6f6f,
+    inset 0 0 0 4px #242424;
 }
 
 .world-loading-spinner {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border: 2px solid rgba(255, 255, 255, 0.26);
   border-top-color: #f8d774;
   border-radius: 50%;
@@ -2376,24 +2403,27 @@ body.pointer-cursor-hidden * {
 }
 
 .world-loading-label {
-  font-size: 0.84rem;
+  font-size: 1.18rem;
   line-height: 1.2;
+  font-weight: 700;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.82);
 }
 
 .world-loading-status {
-  grid-column: 2;
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   line-height: 1.2;
   color: rgba(255, 255, 255, 0.72);
 }
 
 .world-loading-progress {
-  grid-column: 1 / -1;
-  width: min(420px, calc(100vw - 84px));
-  height: 10px;
-  border: 2px solid rgba(255, 255, 255, 0.24);
-  background: rgba(255, 255, 255, 0.08);
+  width: min(420px, calc(100vw - 96px));
+  height: 14px;
+  border: 2px solid #000;
+  background: rgba(14, 14, 14, 0.74);
   overflow: hidden;
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.12),
+    inset 0 0 0 4px rgba(0, 0, 0, 0.36);
 }
 
 .world-loading-progress-fill {
@@ -2484,6 +2514,7 @@ body.pointer-cursor-hidden * {
 }
 
 .menu-splash {
+  display: none !important;
   top: -10px;
   right: -84px;
   font-size: clamp(0.95rem, 2.1vw, 1.45rem);

@@ -1,8 +1,10 @@
 import { PLAYER_CONFIG } from '../game/Config';
+import type { BlockId } from '../types/blocks';
 import {
   blocksMovement,
   getBlockCollisionHeight,
   getWaterLevel,
+  isSnowLayerBlock,
   isWaterBlock,
   isWaterSource,
 } from '../world/BlockRegistry';
@@ -32,6 +34,7 @@ const FLOW_CONTACT_EPSILON = 0.0001;
 const COLLISION_EPSILON = 0.001;
 
 interface BlockBounds {
+  blockId: BlockId;
   minX: number;
   maxX: number;
   minY: number;
@@ -89,6 +92,7 @@ const collectCollidingBlockBounds = (
         }
 
         const bounds: BlockBounds = {
+          blockId,
           minX: x,
           maxX: x + 1,
           minY: y,
@@ -162,6 +166,9 @@ const tryStepUp = (
 
   let targetY = fromPosition[1];
   for (const bounds of collisions) {
+    if (!isSnowLayerBlock(bounds.blockId)) {
+      continue;
+    }
     const stepHeight = bounds.maxY - fromPosition[1];
     if (stepHeight <= COLLISION_EPSILON || stepHeight > PLAYER_CONFIG.autoStepHeight + COLLISION_EPSILON) {
       continue;

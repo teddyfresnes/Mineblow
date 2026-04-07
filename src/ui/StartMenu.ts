@@ -495,12 +495,9 @@ export class StartMenu {
       className: 'menu-logo-text',
       ariaLabel: 'Mineblow',
     });
-    const splash = document.createElement('div');
-    splash.className = 'menu-splash';
-    splash.textContent = '1.0 ALPHA BUILD !!';
     const subtitle = document.createElement('p');
     subtitle.textContent = pickMenuQuote();
-    titleBrand.append(title, splash);
+    titleBrand.append(title);
     masthead.append(titleBrand, subtitle);
 
     const actions = document.createElement('div');
