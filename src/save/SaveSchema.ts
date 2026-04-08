@@ -1,4 +1,10 @@
-import { CONTROL_ACTIONS, MAX_INTERFACE_SIZE, MIN_INTERFACE_SIZE } from '../game/Controls';
+import {
+  CONTROL_ACTIONS,
+  MAX_INTERFACE_SIZE,
+  MAX_RENDER_DISTANCE_CHUNKS,
+  MIN_INTERFACE_SIZE,
+  MIN_RENDER_DISTANCE_CHUNKS,
+} from '../game/Controls';
 import { isUiLanguage } from '../i18n/Language';
 import { WEATHER_PRESET_CHAIN, WEATHER_SURFACE_ACTIONS } from '../types/weather';
 import type {
@@ -64,6 +70,12 @@ const isInterfaceSize = (value: unknown): value is number =>
   Number.isInteger(value) &&
   value >= MIN_INTERFACE_SIZE &&
   value <= MAX_INTERFACE_SIZE;
+
+const isRenderDistanceChunks = (value: unknown): value is number =>
+  isFiniteNumber(value) &&
+  Number.isInteger(value) &&
+  value >= MIN_RENDER_DISTANCE_CHUNKS &&
+  value <= MAX_RENDER_DISTANCE_CHUNKS;
 
 const isWorldStats = (value: unknown): boolean => {
   if (!value || typeof value !== "object") {
@@ -261,7 +273,9 @@ export const isStoredSettings = (value: unknown): value is StoredSettings => {
     (typeof candidate.interfaceSize === 'undefined' || isInterfaceSize(candidate.interfaceSize)) &&
     (typeof candidate.language === 'undefined' || isUiLanguage(candidate.language)) &&
     (typeof candidate.developerDebugMode === 'boolean' ||
-      typeof candidate.developerDebugMode === 'undefined')
+      typeof candidate.developerDebugMode === 'undefined') &&
+    (typeof candidate.renderDistanceChunks === 'undefined' ||
+      isRenderDistanceChunks(candidate.renderDistanceChunks))
   );
 };
 

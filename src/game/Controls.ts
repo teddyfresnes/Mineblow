@@ -1,3 +1,4 @@
+import { WORLD_CONFIG } from './Config';
 import { DEFAULT_UI_LANGUAGE, translate, type UiLanguage } from '../i18n/Language';
 import { isSpecialKeyCode } from '../i18n/messages';
 
@@ -33,11 +34,15 @@ export interface GameSettings {
   interfaceSize: number;
   language: UiLanguage;
   developerDebugMode: boolean;
+  renderDistanceChunks: number;
 }
 
 export const DEFAULT_INTERFACE_SIZE = 5;
 export const MIN_INTERFACE_SIZE = 1;
 export const MAX_INTERFACE_SIZE = 8;
+export const DEFAULT_RENDER_DISTANCE_CHUNKS = WORLD_CONFIG.loadRadius;
+export const MIN_RENDER_DISTANCE_CHUNKS = 1;
+export const MAX_RENDER_DISTANCE_CHUNKS = WORLD_CONFIG.preloadRadius;
 const DEFAULT_SKIN_URL = new URL('../../assets/skins/boys default/colin.png', import.meta.url).href;
 
 export const getControlLabel = (
@@ -68,6 +73,7 @@ export const createDefaultSettings = (): GameSettings => ({
   interfaceSize: DEFAULT_INTERFACE_SIZE,
   language: DEFAULT_UI_LANGUAGE,
   developerDebugMode: false,
+  renderDistanceChunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
 });
 
 export const normalizeInterfaceSize = (value: number): number => {
@@ -92,6 +98,22 @@ export const getInterfaceZoomPercent = (interfaceSize: number): number => {
     return 100 + (DEFAULT_INTERFACE_SIZE - normalized) * 20;
   }
   return Math.max(10, 100 - (normalized - DEFAULT_INTERFACE_SIZE) * 10);
+};
+
+export const normalizeRenderDistanceChunks = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_RENDER_DISTANCE_CHUNKS;
+  }
+  const rounded = Math.round(value);
+  return Math.min(MAX_RENDER_DISTANCE_CHUNKS, Math.max(MIN_RENDER_DISTANCE_CHUNKS, rounded));
+};
+
+export const getNextRenderDistanceChunks = (current: number): number => {
+  const normalized = normalizeRenderDistanceChunks(current);
+  if (normalized >= MAX_RENDER_DISTANCE_CHUNKS) {
+    return MIN_RENDER_DISTANCE_CHUNKS;
+  }
+  return normalized + 1;
 };
 
 export const cloneBindings = (bindings: KeyBindings): KeyBindings => {

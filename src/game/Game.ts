@@ -4,6 +4,7 @@ import {
   createDefaultSettings,
   getInterfaceZoomPercent,
   normalizeInterfaceSize,
+  normalizeRenderDistanceChunks,
   type GameSettings,
 } from './Controls';
 import { GameLoop } from './GameLoop';
@@ -2483,6 +2484,7 @@ export class Game {
       interfaceSize: normalizeInterfaceSize(settings.interfaceSize),
       language: settings.language,
       developerDebugMode: settings.developerDebugMode,
+      renderDistanceChunks: normalizeRenderDistanceChunks(settings.renderDistanceChunks),
     };
     setCurrentLanguage(this.settings.language);
     this.applyInterfaceZoom(this.settings.interfaceSize);
@@ -2495,6 +2497,7 @@ export class Game {
     if (!this.settings.developerDebugMode) {
       this.hud.setGenerating(false);
     }
+    this.renderer.setRenderDistanceChunks(this.settings.renderDistanceChunks);
     this.renderer.setPlayerSkin(this.settings.skinDataUrl);
     void this.saveRepository.saveSettings(this.settings);
     if (this.inventoryScreen.isVisible()) {

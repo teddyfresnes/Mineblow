@@ -22,6 +22,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import { WORLD_CONFIG } from '../game/Config';
+import { normalizeRenderDistanceChunks } from '../game/Controls';
 import type { BlockId } from '../types/blocks';
 import type { WeatherVisualState } from '../types/weather';
 import type { VoxelHit } from '../types/world';
@@ -281,6 +282,7 @@ export class Renderer {
   private jumpTimer = 0;
   private jumpStrength = 0;
   private chunkEdgeFadeBoundsInitialized = false;
+  private renderDistanceChunks: number = WORLD_CONFIG.loadRadius;
   private handAnimationProfile: FirstPersonAnimationProfile = { ...HAND_ANIMATION_PROFILE };
   private skinRequestId = 0;
 
@@ -435,17 +437,28 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     updateSunForCamera(this.lights, position.x, position.z, this.currentSunDirection);
   }
 
+  setRenderDistanceChunks(renderDistanceChunks: number): void {
+    this.renderDistanceChunks = normalizeRenderDistanceChunks(renderDistanceChunks);
+    this.chunkEdgeFadeBufferSize.set(
+      Math.max(0.0001, (WORLD_CONFIG.preloadRadius - this.renderDistanceChunks) * WORLD_CONFIG.chunkSizeX),
+      Math.max(0.0001, (WORLD_CONFIG.preloadRadius - this.renderDistanceChunks) * WORLD_CONFIG.chunkSizeZ),
+    );
+    this.chunkEdgeFadeEnabledUniform.value =
+      WORLD_CONFIG.preloadRadius > this.renderDistanceChunks ? 1 : 0;
+    this.chunkEdgeFadeBoundsInitialized = false;
+  }
+
   setChunkEdgeFadeOrigin(worldX: number, worldZ: number, dt = 0): void {
     const chunkX = Math.floor(worldX / WORLD_CONFIG.chunkSizeX);
     const chunkZ = Math.floor(worldZ / WORLD_CONFIG.chunkSizeZ);
 
     this.chunkEdgeFadeTargetMin.set(
-      (chunkX - WORLD_CONFIG.loadRadius) * WORLD_CONFIG.chunkSizeX,
-      (chunkZ - WORLD_CONFIG.loadRadius) * WORLD_CONFIG.chunkSizeZ,
+      (chunkX - this.renderDistanceChunks) * WORLD_CONFIG.chunkSizeX,
+      (chunkZ - this.renderDistanceChunks) * WORLD_CONFIG.chunkSizeZ,
     );
     this.chunkEdgeFadeTargetMax.set(
-      (chunkX + WORLD_CONFIG.loadRadius + 1) * WORLD_CONFIG.chunkSizeX,
-      (chunkZ + WORLD_CONFIG.loadRadius + 1) * WORLD_CONFIG.chunkSizeZ,
+      (chunkX + this.renderDistanceChunks + 1) * WORLD_CONFIG.chunkSizeX,
+      (chunkZ + this.renderDistanceChunks + 1) * WORLD_CONFIG.chunkSizeZ,
     );
 
     const targetShift = Math.max(

@@ -5,7 +5,9 @@ import {
   getControlLabel,
   getInterfaceZoomPercent,
   getNextInterfaceSize,
+  getNextRenderDistanceChunks,
   formatKeyCode,
+  normalizeRenderDistanceChunks,
   type ControlAction,
   type GameSettings,
 } from '../game/Controls';
@@ -52,6 +54,7 @@ type MenuScreen =
   | 'edit-world'
   | 'settings'
   | 'languages'
+  | 'performance'
   | 'keybindings'
   | 'graphics'
   | 'stats'
@@ -75,6 +78,7 @@ const CLASSIC_SCREENS = new Set<MenuScreen>([
   'edit-world',
   'settings',
   'languages',
+  'performance',
   'keybindings',
   'graphics',
   'stats',
@@ -121,6 +125,7 @@ export class StartMenu {
   private readonly startupFullscreenToggleButton = document.createElement('button');
   private readonly interfaceSizeToggleButton = document.createElement('button');
   private readonly developerDebugModeToggleButton = document.createElement('button');
+  private readonly renderDistanceToggleButton = document.createElement('button');
   private readonly statsTitleHost = document.createElement('div');
   private readonly statsList = document.createElement('div');
   private readonly wardrobeCategorySelect = document.createElement('select');
@@ -198,6 +203,7 @@ export class StartMenu {
     const languagesView = this.buildLanguagesView();
     const keybindingsView = this.buildKeybindingsView();
     const graphicsView = this.buildGraphicsView();
+    const performanceView = this.buildPerformanceView();
     const statsView = this.buildStatsView();
     const pauseView = this.buildPauseView();
     const wardrobeView = this.buildWardrobeView();
@@ -208,6 +214,7 @@ export class StartMenu {
     this.views.set('edit-world', editWorldView);
     this.views.set('settings', settingsView);
     this.views.set('languages', languagesView);
+    this.views.set('performance', performanceView);
     this.views.set('keybindings', keybindingsView);
     this.views.set('graphics', graphicsView);
     this.views.set('stats', statsView);
@@ -221,6 +228,7 @@ export class StartMenu {
       editWorldView,
       settingsView,
       languagesView,
+      performanceView,
       keybindingsView,
       graphicsView,
       statsView,
@@ -270,6 +278,7 @@ export class StartMenu {
     this.renderEditWorldScreen();
     this.renderStatsView();
     this.renderGraphicsView();
+    this.renderPerformanceView();
     this.renderPauseView();
     this.renderLanguageView();
     this.refreshLocalizedText();
@@ -283,14 +292,7 @@ export class StartMenu {
     const previousSkinDataUrl = this.settings.skinDataUrl;
     const previousSelectedCategory = this.selectedWardrobeCategory;
     const previousLanguage = this.settings.language;
-    this.settings = {
-      keyBindings: cloneBindings(settings.keyBindings),
-      skinDataUrl: settings.skinDataUrl,
-      startFullscreen: settings.startFullscreen,
-      interfaceSize: settings.interfaceSize,
-      language: settings.language,
-      developerDebugMode: settings.developerDebugMode,
-    };
+    this.settings = this.createSettingsSnapshot({}, settings);
     const languageChanged = previousLanguage !== this.settings.language;
     this.renderBindings();
     this.syncSkinSelectionFromSettings();
@@ -302,6 +304,7 @@ export class StartMenu {
       this.resetWardrobePendingSelection();
     }
     this.renderGraphicsView();
+    this.renderPerformanceView();
     this.renderLanguageView();
     if (this.currentScreen === 'wardrobe') {
       if (this.wardrobeCategoriesByName.size === 0) {
@@ -455,6 +458,39 @@ export class StartMenu {
     });
   }
 
+  private createSettingsSnapshot(
+    overrides: Partial<GameSettings> = {},
+    baseSettings: GameSettings = this.settings,
+  ): GameSettings {
+    return {
+      keyBindings: cloneBindings(overrides.keyBindings ?? baseSettings.keyBindings),
+      skinDataUrl:
+        typeof overrides.skinDataUrl !== 'undefined' ? overrides.skinDataUrl : baseSettings.skinDataUrl,
+      startFullscreen:
+        typeof overrides.startFullscreen === 'boolean'
+          ? overrides.startFullscreen
+          : baseSettings.startFullscreen,
+      interfaceSize:
+        typeof overrides.interfaceSize === 'number'
+          ? overrides.interfaceSize
+          : baseSettings.interfaceSize,
+      language: overrides.language ?? baseSettings.language,
+      developerDebugMode:
+        typeof overrides.developerDebugMode === 'boolean'
+          ? overrides.developerDebugMode
+          : baseSettings.developerDebugMode,
+      renderDistanceChunks: normalizeRenderDistanceChunks(
+        typeof overrides.renderDistanceChunks === 'number'
+          ? overrides.renderDistanceChunks
+          : baseSettings.renderDistanceChunks,
+      ),
+    };
+  }
+
+  private emitSettingsChange(): void {
+    this.handlers.onSettingsChange(this.createSettingsSnapshot());
+  }
+
   private refreshLocalizedText(): void {
     this.localizedUpdaters.forEach((updater) => updater());
     const knownDefaults = new Set<string>(
@@ -468,6 +504,7 @@ export class StartMenu {
     this.renderEditWorldScreen();
     this.renderBindings();
     this.renderGraphicsView();
+    this.renderPerformanceView();
     this.renderStatsView();
     this.renderPauseView();
     this.renderLanguageView();
@@ -739,14 +776,20 @@ export class StartMenu {
 
     const languageButton = document.createElement('button');
     languageButton.type = 'button';
-    languageButton.className = 'menu-button settings-compact-button settings-language-button';
+    languageButton.className = 'menu-button settings-compact-button';
     this.registerLocalized(() => {
       const languageName = getLanguageLabel(this.settings.language, this.settings.language);
       languageButton.textContent = `${this.t('language')}: ${languageName}`;
     });
     languageButton.addEventListener('click', () => this.showScreen('languages'));
 
-    buttonStack.append(keyBindingsButton, graphicsButton, languageButton);
+    const performanceButton = document.createElement('button');
+    performanceButton.type = 'button';
+    performanceButton.className = 'menu-button settings-compact-button';
+    this.localizeText(performanceButton, 'performance');
+    performanceButton.addEventListener('click', () => this.showScreen('performance'));
+
+    buttonStack.append(keyBindingsButton, graphicsButton, languageButton, performanceButton);
     frame.append(buttonStack);
 
     const footer = document.createElement('div');
@@ -785,28 +828,52 @@ export class StartMenu {
         if (this.settings.language === language) {
           return;
         }
-        this.settings = {
-          keyBindings: cloneBindings(this.settings.keyBindings),
-          skinDataUrl: this.settings.skinDataUrl,
-          startFullscreen: this.settings.startFullscreen,
-          interfaceSize: this.settings.interfaceSize,
-          language,
-          developerDebugMode: this.settings.developerDebugMode,
-        };
+        this.settings = this.createSettingsSnapshot({ language });
         this.refreshLocalizedText();
-        this.handlers.onSettingsChange({
-          keyBindings: cloneBindings(this.settings.keyBindings),
-          skinDataUrl: this.settings.skinDataUrl,
-          startFullscreen: this.settings.startFullscreen,
-          interfaceSize: this.settings.interfaceSize,
-          language,
-          developerDebugMode: this.settings.developerDebugMode,
-        });
+        this.emitSettingsChange();
       });
       this.languageButtons.set(language, button);
       stack.append(button);
     });
 
+    frame.append(stack);
+
+    const footer = document.createElement('div');
+    footer.className = 'classic-footer-row one-column';
+    const backButton = document.createElement('button');
+    backButton.type = 'button';
+    backButton.className = 'menu-button secondary';
+    this.localizeText(backButton, 'back');
+    backButton.addEventListener('click', () => this.showScreen('settings'));
+    footer.append(backButton);
+
+    view.append(frame, footer);
+    return view;
+  }
+
+  private buildPerformanceView(): HTMLElement {
+    const view = document.createElement('section');
+    view.className = 'menu-view menu-view-classic performance-view';
+
+    view.append(this.buildClassicTitle('performanceTitle'));
+
+    const frame = document.createElement('div');
+    frame.className = 'classic-screen-frame settings-screen-frame';
+
+    const stack = document.createElement('div');
+    stack.className = 'classic-button-stack graphics-options-stack';
+
+    this.renderDistanceToggleButton.type = 'button';
+    this.renderDistanceToggleButton.className = 'menu-button settings-compact-button';
+    this.renderDistanceToggleButton.addEventListener('click', () => {
+      this.settings = this.createSettingsSnapshot({
+        renderDistanceChunks: getNextRenderDistanceChunks(this.settings.renderDistanceChunks),
+      });
+      this.renderPerformanceView();
+      this.emitSettingsChange();
+    });
+
+    stack.append(this.renderDistanceToggleButton);
     frame.append(stack);
 
     const footer = document.createElement('div');
@@ -837,45 +904,21 @@ export class StartMenu {
     this.startupFullscreenToggleButton.type = 'button';
     this.startupFullscreenToggleButton.className = 'menu-button settings-compact-button';
     this.startupFullscreenToggleButton.addEventListener('click', () => {
-      this.settings = {
-        keyBindings: cloneBindings(this.settings.keyBindings),
-        skinDataUrl: this.settings.skinDataUrl,
+      this.settings = this.createSettingsSnapshot({
         startFullscreen: !this.settings.startFullscreen,
-        interfaceSize: this.settings.interfaceSize,
-        language: this.settings.language,
-        developerDebugMode: this.settings.developerDebugMode,
-      };
-      this.renderGraphicsView();
-      this.handlers.onSettingsChange({
-        keyBindings: cloneBindings(this.settings.keyBindings),
-        skinDataUrl: this.settings.skinDataUrl,
-        startFullscreen: this.settings.startFullscreen,
-        interfaceSize: this.settings.interfaceSize,
-        language: this.settings.language,
-        developerDebugMode: this.settings.developerDebugMode,
       });
+      this.renderGraphicsView();
+      this.emitSettingsChange();
     });
 
     this.interfaceSizeToggleButton.type = 'button';
     this.interfaceSizeToggleButton.className = 'menu-button settings-compact-button';
     this.interfaceSizeToggleButton.addEventListener('click', () => {
-      this.settings = {
-        keyBindings: cloneBindings(this.settings.keyBindings),
-        skinDataUrl: this.settings.skinDataUrl,
-        startFullscreen: this.settings.startFullscreen,
+      this.settings = this.createSettingsSnapshot({
         interfaceSize: getNextInterfaceSize(this.settings.interfaceSize),
-        language: this.settings.language,
-        developerDebugMode: this.settings.developerDebugMode,
-      };
-      this.renderGraphicsView();
-      this.handlers.onSettingsChange({
-        keyBindings: cloneBindings(this.settings.keyBindings),
-        skinDataUrl: this.settings.skinDataUrl,
-        startFullscreen: this.settings.startFullscreen,
-        interfaceSize: this.settings.interfaceSize,
-        language: this.settings.language,
-        developerDebugMode: this.settings.developerDebugMode,
       });
+      this.renderGraphicsView();
+      this.emitSettingsChange();
     });
 
     this.developerDebugModeToggleButton.type = 'button';
@@ -885,23 +928,9 @@ export class StartMenu {
       if (enabling && !window.confirm(this.t('developerDebugWarning'))) {
         return;
       }
-      this.settings = {
-        keyBindings: cloneBindings(this.settings.keyBindings),
-        skinDataUrl: this.settings.skinDataUrl,
-        startFullscreen: this.settings.startFullscreen,
-        interfaceSize: this.settings.interfaceSize,
-        language: this.settings.language,
-        developerDebugMode: enabling,
-      };
+      this.settings = this.createSettingsSnapshot({ developerDebugMode: enabling });
       this.renderGraphicsView();
-      this.handlers.onSettingsChange({
-        keyBindings: cloneBindings(this.settings.keyBindings),
-        skinDataUrl: this.settings.skinDataUrl,
-        startFullscreen: this.settings.startFullscreen,
-        interfaceSize: this.settings.interfaceSize,
-        language: this.settings.language,
-        developerDebugMode: this.settings.developerDebugMode,
-      });
+      this.emitSettingsChange();
     });
 
     stack.append(
@@ -976,23 +1005,11 @@ export class StartMenu {
     this.localizeText(resetButton, 'resetDefaults');
     resetButton.addEventListener('click', () => {
       const defaults = createDefaultSettings();
-      this.settings = {
-        keyBindings: cloneBindings(defaults.keyBindings),
-        skinDataUrl: this.settings.skinDataUrl,
-        startFullscreen: this.settings.startFullscreen,
-        interfaceSize: this.settings.interfaceSize,
-        language: this.settings.language,
-        developerDebugMode: this.settings.developerDebugMode,
-      };
-      this.renderBindings();
-      this.handlers.onSettingsChange({
-        keyBindings: cloneBindings(this.settings.keyBindings),
-        skinDataUrl: this.settings.skinDataUrl,
-        startFullscreen: this.settings.startFullscreen,
-        interfaceSize: this.settings.interfaceSize,
-        language: this.settings.language,
-        developerDebugMode: this.settings.developerDebugMode,
+      this.settings = this.createSettingsSnapshot({
+        keyBindings: defaults.keyBindings,
       });
+      this.renderBindings();
+      this.emitSettingsChange();
     });
 
     const backButton = document.createElement('button');
@@ -1223,6 +1240,7 @@ export class StartMenu {
     this.renderEditWorldScreen();
     this.renderBindings();
     this.renderGraphicsView();
+    this.renderPerformanceView();
     this.renderPauseView();
     this.renderStatsView();
     this.renderLanguageView();
@@ -1457,6 +1475,12 @@ export class StartMenu {
     this.developerDebugModeToggleButton.textContent = `${this.t('developerDebugMode')}: ${
       this.settings.developerDebugMode ? this.t('stateOn') : this.t('stateOff')
     }`;
+  }
+
+  private renderPerformanceView(): void {
+    this.renderDistanceToggleButton.textContent = `${this.t('renderDistance')}: ${
+      this.settings.renderDistanceChunks
+    } chunks`;
   }
 
   private renderLanguageView(): void {
@@ -2280,22 +2304,8 @@ export class StartMenu {
       this.importedSkinName = null;
       this.selectedSkinName = this.t('defaultSkin');
     }
-    this.settings = {
-      keyBindings: cloneBindings(this.settings.keyBindings),
-      skinDataUrl,
-      startFullscreen: this.settings.startFullscreen,
-      interfaceSize: this.settings.interfaceSize,
-      language: this.settings.language,
-      developerDebugMode: this.settings.developerDebugMode,
-    };
-    this.handlers.onSettingsChange({
-      keyBindings: cloneBindings(this.settings.keyBindings),
-      skinDataUrl,
-      startFullscreen: this.settings.startFullscreen,
-      interfaceSize: this.settings.interfaceSize,
-      language: this.settings.language,
-      developerDebugMode: this.settings.developerDebugMode,
-    });
+    this.settings = this.createSettingsSnapshot({ skinDataUrl });
+    this.emitSettingsChange();
   }
 
   private startBindingCapture(action: ControlAction, slot: BindingSlot): void {
@@ -2321,14 +2331,7 @@ export class StartMenu {
     }
     this.listeningBinding = null;
     this.renderBindings();
-    this.handlers.onSettingsChange({
-      keyBindings: cloneBindings(this.settings.keyBindings),
-      skinDataUrl: this.settings.skinDataUrl,
-      startFullscreen: this.settings.startFullscreen,
-      interfaceSize: this.settings.interfaceSize,
-      language: this.settings.language,
-      developerDebugMode: this.settings.developerDebugMode,
-    });
+    this.emitSettingsChange();
   }
 
   private handleMenuNavigationKey(event: KeyboardEvent): void {
@@ -2496,6 +2499,7 @@ export class StartMenu {
       case 'keybindings':
       case 'graphics':
       case 'languages':
+      case 'performance':
         return 'settings';
       case 'settings':
       case 'stats':

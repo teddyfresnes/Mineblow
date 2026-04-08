@@ -2,9 +2,11 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import { SAVE_CONFIG } from '../game/Config';
 import {
   CONTROL_ACTIONS,
+  DEFAULT_RENDER_DISTANCE_CHUNKS,
   DEFAULT_INTERFACE_SIZE,
   createDefaultSettings,
   normalizeInterfaceSize,
+  normalizeRenderDistanceChunks,
   type GameSettings,
 } from '../game/Controls';
 import { DEFAULT_UI_LANGUAGE } from '../i18n/Language';
@@ -112,6 +114,9 @@ const hydrateSettings = (value: unknown): GameSettings | null => {
       typeof candidate.developerDebugMode === 'boolean'
         ? candidate.developerDebugMode
         : defaults.developerDebugMode,
+    renderDistanceChunks: normalizeRenderDistanceChunks(
+      candidate.renderDistanceChunks ?? DEFAULT_RENDER_DISTANCE_CHUNKS,
+    ),
   };
 };
 
@@ -473,6 +478,9 @@ export class SaveRepository {
         interfaceSize: normalizeInterfaceSize(settings.interfaceSize ?? DEFAULT_INTERFACE_SIZE),
         language: settings.language ?? DEFAULT_UI_LANGUAGE,
         developerDebugMode: settings.developerDebugMode ?? false,
+        renderDistanceChunks: normalizeRenderDistanceChunks(
+          settings.renderDistanceChunks ?? DEFAULT_RENDER_DISTANCE_CHUNKS,
+        ),
       };
     }
 

@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
+import { createDefaultSettings } from '../game/Controls';
 import { INVENTORY_LAYOUT } from '../inventory/Inventory';
 import { SaveRepository } from './SaveRepository';
 
@@ -93,5 +94,18 @@ describe('SaveRepository', () => {
       changes: [{ index: 12, blockId: 0 }],
       surfaceWeatherTick: 12,
     });
+  });
+
+  it('persists render distance in settings', async () => {
+    const repository = new SaveRepository();
+    await repository.clear();
+
+    const settings = createDefaultSettings();
+    settings.renderDistanceChunks = 4;
+
+    await repository.saveSettings(settings);
+
+    const loaded = await repository.loadSettings();
+    expect(loaded.renderDistanceChunks).toBe(4);
   });
 });
