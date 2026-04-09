@@ -1,4 +1,5 @@
 import { WORLD_CONFIG } from '../game/Config';
+import { normalizeRenderDistanceChunks } from '../game/Controls';
 import type { BlockId } from '../types/blocks';
 import type { ChunkDiffRecord } from '../types/save';
 import type {
@@ -82,6 +83,7 @@ const FLUID_INTERFACE_OFFSETS: Array<[number, number]> = [
 ];
 const FLUID_UPDATE_DELAY_TICKS = 5;
 const WEATHER_ACCUMULATION_STEP_SECONDS = 8;
+const DEFAULT_CHUNK_PRELOAD_BUFFER_RADIUS = Math.max(0, WORLD_CONFIG.preloadRadius - WORLD_CONFIG.loadRadius);
 const SURFACE_WEATHER_ACTION_PROFILES: Record<WeatherSurfaceAction, SurfaceActionProfile> = {
   idle: {
     snowSampleModulo: Number.MAX_SAFE_INTEGER,
@@ -149,6 +151,9 @@ export class World {
   private weatherAccumulationAccumulator = 0;
   private weatherAccumulationTick = 0;
   private lastStreamingSignature: string | null = null;
+  private readonly preloadBufferRadiusChunks = DEFAULT_CHUNK_PRELOAD_BUFFER_RADIUS;
+  private renderDistanceChunks: number = Math.min(WORLD_CONFIG.loadRadius, WORLD_CONFIG.preloadRadius);
+  private preloadRadiusChunks: number = WORLD_CONFIG.preloadRadius;
 
   constructor(
     readonly seed: string,
@@ -286,10 +291,17 @@ export class World {
     return worldToChunkCoord(Math.floor(x), Math.floor(z));
   }
 
+  setRenderDistanceChunks(renderDistanceChunks: number): void {
+    this.renderDistanceChunks = normalizeRenderDistanceChunks(renderDistanceChunks);
+    this.preloadRadiusChunks = this.renderDistanceChunks + this.preloadBufferRadiusChunks;
+    this.lastStreamingSignature = null;
+  }
+
   enqueueStreamingAround(worldX: number, worldZ: number): void {
     const center = this.getPlayerChunkCoord(worldX, worldZ);
-    const unloadRadius = WORLD_CONFIG.preloadRadius + WORLD_CONFIG.unloadRadiusBuffer;
-    const streamingSignature = `${center.x},${center.z}:${WORLD_CONFIG.preloadRadius}:${unloadRadius}`;
+    const preloadRadius = this.preloadRadiusChunks;
+    const unloadRadius = preloadRadius + WORLD_CONFIG.unloadRadiusBuffer;
+    const streamingSignature = `${center.x},${center.z}:${preloadRadius}:${unloadRadius}`;
     if (streamingSignature === this.lastStreamingSignature) {
       return;
     }
@@ -300,13 +312,13 @@ export class World {
     const candidates: Array<{ coord: ChunkCoord; distance: number }> = [];
 
     for (
-      let chunkX = center.x - WORLD_CONFIG.preloadRadius;
-      chunkX <= center.x + WORLD_CONFIG.preloadRadius;
+      let chunkX = center.x - preloadRadius;
+      chunkX <= center.x + preloadRadius;
       chunkX += 1
     ) {
       for (
-        let chunkZ = center.z - WORLD_CONFIG.preloadRadius;
-        chunkZ <= center.z + WORLD_CONFIG.preloadRadius;
+        let chunkZ = center.z - preloadRadius;
+        chunkZ <= center.z + preloadRadius;
         chunkZ += 1
       ) {
         const coord = { x: chunkX, z: chunkZ };

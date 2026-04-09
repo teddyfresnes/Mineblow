@@ -101,11 +101,11 @@ describe('SaveRepository', () => {
     await repository.clear();
 
     const settings = createDefaultSettings();
-    settings.renderDistanceChunks = 4;
+    settings.renderDistanceChunks = 12;
 
     await repository.saveSettings(settings);
 
     const loaded = await repository.loadSettings();
-    expect(loaded.renderDistanceChunks).toBe(4);
+    expect(loaded.renderDistanceChunks).toBe(12);
   });
 });

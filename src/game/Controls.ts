@@ -42,7 +42,7 @@ export const MIN_INTERFACE_SIZE = 1;
 export const MAX_INTERFACE_SIZE = 8;
 export const DEFAULT_RENDER_DISTANCE_CHUNKS = WORLD_CONFIG.loadRadius;
 export const MIN_RENDER_DISTANCE_CHUNKS = 1;
-export const MAX_RENDER_DISTANCE_CHUNKS = WORLD_CONFIG.preloadRadius;
+export const MAX_RENDER_DISTANCE_CHUNKS = 16;
 const DEFAULT_SKIN_URL = new URL('../../assets/skins/boys default/colin.png', import.meta.url).href;
 
 export const getControlLabel = (

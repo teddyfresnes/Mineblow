@@ -596,6 +596,7 @@ export class Game {
     this.renderer.clearChunks();
 
     const world = new World(seed);
+    world.setRenderDistanceChunks(this.settings.renderDistanceChunks);
     const spawnPoint = SpawnResolver.resolve(world);
     const playerState: PlayerState = {
       position: [...spawnPoint],
@@ -653,6 +654,7 @@ export class Game {
       loaded.chunkDiffs,
       normalizeEnvironmentState(loaded.save.environment).surfaceWeather,
     );
+    world.setRenderDistanceChunks(this.settings.renderDistanceChunks);
     const playerState = this.createSafePlayerState(loaded.save.player, world);
     const inventory = new Inventory(loaded.save.inventory, playerState.selectedSlot);
     const worldStats = this.normalizeWorldStats(loaded.save.worldStats);
@@ -2497,6 +2499,7 @@ export class Game {
     if (!this.settings.developerDebugMode) {
       this.hud.setGenerating(false);
     }
+    this.session?.world.setRenderDistanceChunks(this.settings.renderDistanceChunks);
     this.renderer.setRenderDistanceChunks(this.settings.renderDistanceChunks);
     this.renderer.setPlayerSkin(this.settings.skinDataUrl);
     void this.saveRepository.saveSettings(this.settings);

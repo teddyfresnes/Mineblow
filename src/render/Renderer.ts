@@ -124,6 +124,7 @@ const CHUNK_EDGE_FADE_SHIFT_RESPONSE = 9;
 const CHUNK_EDGE_FADE_SHIFT_MAX_DT = 0.1;
 const CHUNK_EDGE_FADE_SHIFT_SNAP_DISTANCE =
   Math.max(WORLD_CONFIG.chunkSizeX, WORLD_CONFIG.chunkSizeZ) * 1.5;
+const CHUNK_PRELOAD_BUFFER_RADIUS = Math.max(0, WORLD_CONFIG.preloadRadius - WORLD_CONFIG.loadRadius);
 
 type MaterialShader = Parameters<NonNullable<MeshLambertMaterial['onBeforeCompile']>>[0];
 
@@ -283,6 +284,7 @@ export class Renderer {
   private jumpStrength = 0;
   private chunkEdgeFadeBoundsInitialized = false;
   private renderDistanceChunks: number = WORLD_CONFIG.loadRadius;
+  private fogDistanceScale = 1;
   private handAnimationProfile: FirstPersonAnimationProfile = { ...HAND_ANIMATION_PROFILE };
   private skinRequestId = 0;
 
@@ -440,11 +442,11 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
   setRenderDistanceChunks(renderDistanceChunks: number): void {
     this.renderDistanceChunks = normalizeRenderDistanceChunks(renderDistanceChunks);
     this.chunkEdgeFadeBufferSize.set(
-      Math.max(0.0001, (WORLD_CONFIG.preloadRadius - this.renderDistanceChunks) * WORLD_CONFIG.chunkSizeX),
-      Math.max(0.0001, (WORLD_CONFIG.preloadRadius - this.renderDistanceChunks) * WORLD_CONFIG.chunkSizeZ),
+      Math.max(0.0001, CHUNK_PRELOAD_BUFFER_RADIUS * WORLD_CONFIG.chunkSizeX),
+      Math.max(0.0001, CHUNK_PRELOAD_BUFFER_RADIUS * WORLD_CONFIG.chunkSizeZ),
     );
-    this.chunkEdgeFadeEnabledUniform.value =
-      WORLD_CONFIG.preloadRadius > this.renderDistanceChunks ? 1 : 0;
+    this.chunkEdgeFadeEnabledUniform.value = CHUNK_PRELOAD_BUFFER_RADIUS > 0 ? 1 : 0;
+    this.fogDistanceScale = 1 + Math.max(0, this.renderDistanceChunks - WORLD_CONFIG.loadRadius) * 0.08;
     this.chunkEdgeFadeBoundsInitialized = false;
   }
 
@@ -779,10 +781,12 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
 
     this.airFogNear =
       lerp(AIR_FOG_NEAR_NIGHT, AIR_FOG_NEAR, daylight) *
-      lerp(1, 0.82, fogDimming);
+      lerp(1, 0.82, fogDimming) *
+      lerp(1, this.fogDistanceScale, 0.38);
     this.airFogFar =
       lerp(AIR_FOG_FAR_NIGHT, AIR_FOG_FAR, daylight) *
-      lerp(1, 0.54, fogDimming);
+      lerp(1, 0.54, fogDimming) *
+      this.fogDistanceScale;
     this.airExposure =
       lerp(AIR_EXPOSURE_NIGHT, AIR_EXPOSURE, daylight) *
       lerp(0.76, 1, skyBrightness);

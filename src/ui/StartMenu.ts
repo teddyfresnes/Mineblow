@@ -1,11 +1,12 @@
 import {
   CONTROL_ACTIONS,
+  MAX_RENDER_DISTANCE_CHUNKS,
+  MIN_RENDER_DISTANCE_CHUNKS,
   cloneBindings,
   createDefaultSettings,
   getControlLabel,
   getInterfaceZoomPercent,
   getNextInterfaceSize,
-  getNextRenderDistanceChunks,
   formatKeyCode,
   normalizeRenderDistanceChunks,
   type ControlAction,
@@ -125,7 +126,8 @@ export class StartMenu {
   private readonly startupFullscreenToggleButton = document.createElement('button');
   private readonly interfaceSizeToggleButton = document.createElement('button');
   private readonly developerDebugModeToggleButton = document.createElement('button');
-  private readonly renderDistanceToggleButton = document.createElement('button');
+  private readonly renderDistanceSlider = document.createElement('input');
+  private readonly renderDistanceValue = document.createElement('div');
   private readonly statsTitleHost = document.createElement('div');
   private readonly statsList = document.createElement('div');
   private readonly wardrobeCategorySelect = document.createElement('select');
@@ -861,19 +863,44 @@ export class StartMenu {
     frame.className = 'classic-screen-frame settings-screen-frame';
 
     const stack = document.createElement('div');
-    stack.className = 'classic-button-stack graphics-options-stack';
+    stack.className = 'classic-button-stack graphics-options-stack performance-options-stack';
 
-    this.renderDistanceToggleButton.type = 'button';
-    this.renderDistanceToggleButton.className = 'menu-button settings-compact-button';
-    this.renderDistanceToggleButton.addEventListener('click', () => {
+    const sliderGroup = document.createElement('label');
+    sliderGroup.className = 'performance-slider-group';
+
+    this.renderDistanceValue.className = 'performance-slider-value';
+    sliderGroup.append(this.renderDistanceValue);
+
+    this.renderDistanceSlider.type = 'range';
+    this.renderDistanceSlider.className = 'performance-slider';
+    this.renderDistanceSlider.min = String(MIN_RENDER_DISTANCE_CHUNKS);
+    this.renderDistanceSlider.max = String(MAX_RENDER_DISTANCE_CHUNKS);
+    this.renderDistanceSlider.step = '1';
+    this.renderDistanceSlider.setAttribute('aria-label', this.t('renderDistance'));
+    this.renderDistanceSlider.addEventListener('input', () => {
+      const nextValue = normalizeRenderDistanceChunks(Number(this.renderDistanceSlider.value));
+      if (nextValue === this.settings.renderDistanceChunks) {
+        this.renderPerformanceView();
+        return;
+      }
       this.settings = this.createSettingsSnapshot({
-        renderDistanceChunks: getNextRenderDistanceChunks(this.settings.renderDistanceChunks),
+        renderDistanceChunks: nextValue,
       });
       this.renderPerformanceView();
       this.emitSettingsChange();
     });
+    sliderGroup.append(this.renderDistanceSlider);
 
-    stack.append(this.renderDistanceToggleButton);
+    const sliderLegend = document.createElement('div');
+    sliderLegend.className = 'performance-slider-legend';
+    const minLabel = document.createElement('span');
+    minLabel.textContent = String(MIN_RENDER_DISTANCE_CHUNKS);
+    const maxLabel = document.createElement('span');
+    maxLabel.textContent = String(MAX_RENDER_DISTANCE_CHUNKS);
+    sliderLegend.append(minLabel, maxLabel);
+    sliderGroup.append(sliderLegend);
+
+    stack.append(sliderGroup);
     frame.append(stack);
 
     const footer = document.createElement('div');
@@ -1478,7 +1505,9 @@ export class StartMenu {
   }
 
   private renderPerformanceView(): void {
-    this.renderDistanceToggleButton.textContent = `${this.t('renderDistance')}: ${
+    this.renderDistanceSlider.value = String(this.settings.renderDistanceChunks);
+    this.renderDistanceSlider.setAttribute('aria-valuenow', String(this.settings.renderDistanceChunks));
+    this.renderDistanceValue.textContent = `${this.t('renderDistance')}: ${
       this.settings.renderDistanceChunks
     } chunks`;
   }
