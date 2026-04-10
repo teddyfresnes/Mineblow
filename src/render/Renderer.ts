@@ -320,7 +320,7 @@ export class Renderer {
     this.atlas.material.onBeforeCompile = (shader) => {
       this.applyChunkEdgeFadeShader(shader);
     };
-    this.atlas.material.customProgramCacheKey = () => 'chunk-edge-fade-v1';
+    this.atlas.material.customProgramCacheKey = () => 'chunk-edge-fade-v2';
     this.waterMaterial = new MeshLambertMaterial({
       map: atlasMap,
       color: WATER_TINT_COLOR.clone(),
@@ -377,7 +377,7 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
         value: number;
       };
     };
-    this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v5';
+    this.waterMaterial.customProgramCacheKey = () => 'water-tint-filter-v6';
     this.scene.add(this.sky.group);
     this.scene.add(this.clouds.group);
     this.scene.add(this.rain.group);
@@ -1128,6 +1128,13 @@ uniform vec3 uChunkEdgeFadeColor;
 uniform float uChunkEdgeFadeEnabled;
 varying vec3 vChunkEdgeFadeWorldPosition;
 
+float getWorldFogDistance(vec3 worldPosition) {
+  vec2 horizontalOffset = worldPosition.xz - cameraPosition.xz;
+  float horizontalDistance = length(horizontalOffset);
+  float verticalDistance = abs(worldPosition.y - cameraPosition.y) * 0.15;
+  return horizontalDistance + verticalDistance;
+}
+
 float getChunkEdgeFadeFactor(vec2 worldXZ) {
   if (uChunkEdgeFadeEnabled < 0.5) {
     return 0.0;
@@ -1144,7 +1151,15 @@ float getChunkEdgeFadeFactor(vec2 worldXZ) {
       )
       .replace(
         '#include <fog_fragment>',
-        `#include <fog_fragment>
+        `#ifdef USE_FOG
+float worldFogDistance = getWorldFogDistance(vChunkEdgeFadeWorldPosition);
+#ifdef FOG_EXP2
+float fogFactor = 1.0 - exp(-fogDensity * fogDensity * worldFogDistance * worldFogDistance);
+#else
+float fogFactor = smoothstep(fogNear, fogFar, worldFogDistance);
+#endif
+gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, fogFactor);
+#endif
 float chunkEdgeFade = getChunkEdgeFadeFactor(vChunkEdgeFadeWorldPosition.xz);
 gl_FragColor.rgb = mix(gl_FragColor.rgb, uChunkEdgeFadeColor, chunkEdgeFade);
 `,

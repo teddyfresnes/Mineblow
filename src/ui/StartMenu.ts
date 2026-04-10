@@ -868,15 +868,23 @@ export class StartMenu {
     const sliderGroup = document.createElement('label');
     sliderGroup.className = 'performance-slider-group';
 
+    const sliderHeader = document.createElement('div');
+    sliderHeader.className = 'performance-slider-header';
+    const sliderLabel = document.createElement('span');
+    sliderLabel.className = 'performance-slider-label';
+    this.localizeText(sliderLabel, 'renderDistance');
     this.renderDistanceValue.className = 'performance-slider-value';
-    sliderGroup.append(this.renderDistanceValue);
+    sliderHeader.append(sliderLabel, this.renderDistanceValue);
+    sliderGroup.append(sliderHeader);
 
     this.renderDistanceSlider.type = 'range';
     this.renderDistanceSlider.className = 'performance-slider';
     this.renderDistanceSlider.min = String(MIN_RENDER_DISTANCE_CHUNKS);
     this.renderDistanceSlider.max = String(MAX_RENDER_DISTANCE_CHUNKS);
     this.renderDistanceSlider.step = '1';
-    this.renderDistanceSlider.setAttribute('aria-label', this.t('renderDistance'));
+    this.registerLocalized(() => {
+      this.renderDistanceSlider.setAttribute('aria-label', this.t('renderDistance'));
+    });
     this.renderDistanceSlider.addEventListener('input', () => {
       const nextValue = normalizeRenderDistanceChunks(Number(this.renderDistanceSlider.value));
       if (nextValue === this.settings.renderDistanceChunks) {
@@ -889,7 +897,11 @@ export class StartMenu {
       this.renderPerformanceView();
       this.emitSettingsChange();
     });
-    sliderGroup.append(this.renderDistanceSlider);
+
+    const sliderWell = document.createElement('div');
+    sliderWell.className = 'performance-slider-well';
+    sliderWell.append(this.renderDistanceSlider);
+    sliderGroup.append(sliderWell);
 
     const sliderLegend = document.createElement('div');
     sliderLegend.className = 'performance-slider-legend';
@@ -1505,11 +1517,17 @@ export class StartMenu {
   }
 
   private renderPerformanceView(): void {
+    const progressRatio =
+      (this.settings.renderDistanceChunks - MIN_RENDER_DISTANCE_CHUNKS) /
+      Math.max(1, MAX_RENDER_DISTANCE_CHUNKS - MIN_RENDER_DISTANCE_CHUNKS);
     this.renderDistanceSlider.value = String(this.settings.renderDistanceChunks);
+    this.renderDistanceSlider.style.setProperty('--slider-progress', `${Math.round(progressRatio * 100)}%`);
     this.renderDistanceSlider.setAttribute('aria-valuenow', String(this.settings.renderDistanceChunks));
-    this.renderDistanceValue.textContent = `${this.t('renderDistance')}: ${
-      this.settings.renderDistanceChunks
-    } chunks`;
+    this.renderDistanceSlider.setAttribute(
+      'aria-valuetext',
+      `${this.settings.renderDistanceChunks} chunks`,
+    );
+    this.renderDistanceValue.textContent = `${this.settings.renderDistanceChunks} chunks`;
   }
 
   private renderLanguageView(): void {

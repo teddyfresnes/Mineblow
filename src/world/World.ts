@@ -84,6 +84,10 @@ const FLUID_INTERFACE_OFFSETS: Array<[number, number]> = [
 const FLUID_UPDATE_DELAY_TICKS = 5;
 const WEATHER_ACCUMULATION_STEP_SECONDS = 8;
 const DEFAULT_CHUNK_PRELOAD_BUFFER_RADIUS = Math.max(0, WORLD_CONFIG.preloadRadius - WORLD_CONFIG.loadRadius);
+const ICE_THAW_BASE_SAMPLE_CHANCE = 0.045;
+const ICE_THAW_HOLE_NEIGHBOR_BONUS = 0.28;
+const ICE_THAW_MAX_SAMPLE_CHANCE = 0.92;
+const ICE_THAW_SPREAD_FROM_HOLE_CHANCE = 0.82;
 const SURFACE_WEATHER_ACTION_PROFILES: Record<WeatherSurfaceAction, SurfaceActionProfile> = {
   idle: {
     snowSampleModulo: Number.MAX_SAFE_INTEGER,
@@ -1401,7 +1405,7 @@ export class World {
     }
 
     if (profile.thawSampleModulo <= 1 || Math.abs(sampleHash) % profile.thawSampleModulo === 0) {
-      this.tryThawSurfaceAtColumn(chunk, originX, originZ, localX, localZ);
+      this.tryThawSurfaceAtColumn(chunk, originX, originZ, localX, localZ, sampleHash);
     }
   }
 
@@ -1486,6 +1490,7 @@ export class World {
     originZ: number,
     localX: number,
     localZ: number,
+    sampleHash: number,
   ): void {
     const surface = this.getChunkSurfaceState(chunk, localX, localZ);
     if (!surface) {
@@ -1506,8 +1511,86 @@ export class World {
     }
 
     if (surface.blockId === ICE_BLOCK_ID) {
-      void this.setBlock(worldX, surface.blockY, worldZ, WATER_SOURCE_BLOCK_ID);
+      this.tryThawIceAtColumn(chunk, originX, originZ, localX, localZ, surface.blockY, sampleHash);
+      return;
     }
+
+    if (isWaterSource(surface.blockId)) {
+      this.trySpreadIceThawFromHole(chunk, originX, originZ, localX, localZ, surface.blockY, sampleHash);
+    }
+  }
+
+  private tryThawIceAtColumn(
+    chunk: Chunk,
+    originX: number,
+    originZ: number,
+    localX: number,
+    localZ: number,
+    worldY: number,
+    sampleHash: number,
+  ): void {
+    if (!this.isSurfaceIceAtLocalColumn(chunk, localX, worldY, localZ)) {
+      return;
+    }
+
+    const worldX = originX + localX;
+    const worldZ = originZ + localZ;
+    const holeNeighbors = this.countAdjacentIceHolesInChunk(chunk, localX, worldY, localZ);
+    const thawChance = Math.min(
+      ICE_THAW_MAX_SAMPLE_CHANCE,
+      ICE_THAW_BASE_SAMPLE_CHANCE + holeNeighbors * ICE_THAW_HOLE_NEIGHBOR_BONUS,
+    );
+    const thawHash = hash32(
+      sampleHash ^
+        Math.imul(worldX, 0x632be59b) ^
+        Math.imul(worldZ, 0x85157af5) ^
+        Math.imul(worldY + 1, 0x9e3779b1),
+    );
+    if (hashToUnitFloat(thawHash) >= thawChance) {
+      return;
+    }
+
+    void this.setBlock(worldX, worldY, worldZ, WATER_SOURCE_BLOCK_ID);
+  }
+
+  private trySpreadIceThawFromHole(
+    chunk: Chunk,
+    originX: number,
+    originZ: number,
+    localX: number,
+    localZ: number,
+    worldY: number,
+    sampleHash: number,
+  ): void {
+    if (!this.isExposedWaterHoleAtLocalColumn(chunk, localX, worldY, localZ)) {
+      return;
+    }
+
+    const candidateOffsets = FLUID_HORIZONTAL_OFFSETS.filter(([offsetX, offsetZ]) =>
+      this.isSurfaceIceAtLocalColumn(chunk, localX + offsetX, worldY, localZ + offsetZ),
+    );
+    if (candidateOffsets.length === 0) {
+      return;
+    }
+
+    const spreadHash = hash32(
+      sampleHash ^
+        Math.imul(originX + localX, 0x27d4eb2d) ^
+        Math.imul(originZ + localZ, 0x165667b1) ^
+        0x68e31da4,
+    );
+    if (hashToUnitFloat(spreadHash) >= ICE_THAW_SPREAD_FROM_HOLE_CHANCE) {
+      return;
+    }
+
+    const choiceIndex = Math.floor(hashToUnitFloat(hash32(spreadHash ^ 0x94d049bb)) * candidateOffsets.length);
+    const [offsetX, offsetZ] = candidateOffsets[Math.min(candidateOffsets.length - 1, choiceIndex)]!;
+    void this.setBlock(
+      originX + localX + offsetX,
+      worldY,
+      originZ + localZ + offsetZ,
+      WATER_SOURCE_BLOCK_ID,
+    );
   }
 
   private getSnowColumnLayerCount(worldX: number, worldY: number, worldZ: number): number {
@@ -1561,6 +1644,61 @@ export class World {
       !isWaterBlock(blockId) &&
       !isSnowLayerBlock(blockId)
     );
+  }
+
+  private countAdjacentIceHolesInChunk(
+    chunk: Chunk,
+    localX: number,
+    worldY: number,
+    localZ: number,
+  ): number {
+    let count = 0;
+    for (const [offsetX, offsetZ] of FLUID_HORIZONTAL_OFFSETS) {
+      if (this.isExposedWaterHoleAtLocalColumn(chunk, localX + offsetX, worldY, localZ + offsetZ)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  private isSurfaceIceAtLocalColumn(
+    chunk: Chunk,
+    localX: number,
+    worldY: number,
+    localZ: number,
+  ): boolean {
+    if (
+      localX < 0 ||
+      localZ < 0 ||
+      localX >= WORLD_CONFIG.chunkSizeX ||
+      localZ >= WORLD_CONFIG.chunkSizeZ ||
+      worldY < 0 ||
+      worldY >= WORLD_CONFIG.chunkSizeY - 1
+    ) {
+      return false;
+    }
+
+    return chunk.getBlock(localX, worldY, localZ) === ICE_BLOCK_ID && chunk.getBlock(localX, worldY + 1, localZ) === 0;
+  }
+
+  private isExposedWaterHoleAtLocalColumn(
+    chunk: Chunk,
+    localX: number,
+    worldY: number,
+    localZ: number,
+  ): boolean {
+    if (
+      localX < 0 ||
+      localZ < 0 ||
+      localX >= WORLD_CONFIG.chunkSizeX ||
+      localZ >= WORLD_CONFIG.chunkSizeZ ||
+      worldY < 0 ||
+      worldY >= WORLD_CONFIG.chunkSizeY - 1
+    ) {
+      return false;
+    }
+
+    return isWaterSource(chunk.getBlock(localX, worldY, localZ)) && chunk.getBlock(localX, worldY + 1, localZ) === 0;
   }
 
   private hasAdjacentSurfaceFreezeSupport(worldX: number, worldY: number, worldZ: number): boolean {

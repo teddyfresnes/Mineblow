@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WORLD_CONFIG } from '../game/Config';
+import { ICE_BLOCK_ID, WATER_SOURCE_BLOCK_ID } from './BlockRegistry';
 import { buildWeatherVisualState } from './Weather';
 import { shouldAccumulateSnowLayerFromHash, World } from './World';
 
@@ -181,6 +182,97 @@ describe('World diffs', () => {
     } finally {
       eagerWorld.dispose();
       delayedWorld.dispose();
+    }
+  });
+
+  it('melts ice slowly and speeds up around an exposed hole', () => {
+    const world = new World('surface-ice-thaw');
+    world.primeAround(0, 0, 0);
+
+    try {
+      for (let x = 0; x < WORLD_CONFIG.chunkSizeX; x += 1) {
+        for (let z = 0; z < WORLD_CONFIG.chunkSizeZ; z += 1) {
+          world.setBlock(x, 89, z, 3);
+          world.setBlock(x, 90, z, ICE_BLOCK_ID);
+          for (let y = 91; y < WORLD_CONFIG.chunkSizeY; y += 1) {
+            world.setBlock(x, y, z, 0);
+          }
+        }
+      }
+
+      world.setBlock(8, 90, 8, WATER_SOURCE_BLOCK_ID);
+      const thawWeather = buildManualWeather('clear', 16);
+
+      for (let tick = 0; tick < 640; tick += 1) {
+        world.tickWeatherAccumulation(8, thawWeather);
+      }
+
+      let adjacentWaterCount = 0;
+      const adjacentOffsets: Array<[number, number]> = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ];
+      for (const [offsetX, offsetZ] of adjacentOffsets) {
+        if (world.getBlock(8 + offsetX, 90, 8 + offsetZ) === WATER_SOURCE_BLOCK_ID) {
+          adjacentWaterCount += 1;
+        }
+      }
+
+      expect(adjacentWaterCount).toBeGreaterThan(0);
+      expect(world.getBlock(0, 90, 0)).toBe(ICE_BLOCK_ID);
+    } finally {
+      world.dispose();
+    }
+  });
+
+  it('replays missed ice thaw history when a chunk is loaded later', () => {
+    const sourceWorld = new World('surface-ice-catch-up');
+
+    try {
+      sourceWorld.primeAround(0, 0, 0);
+      sourceWorld.primeAround(WORLD_CONFIG.chunkSizeX, 0, 0);
+
+      for (let x = 0; x < WORLD_CONFIG.chunkSizeX * 2; x += 1) {
+        for (let z = 0; z < WORLD_CONFIG.chunkSizeZ; z += 1) {
+          sourceWorld.setBlock(x, 89, z, 3);
+          sourceWorld.setBlock(x, 90, z, ICE_BLOCK_ID);
+          for (let y = 91; y < WORLD_CONFIG.chunkSizeY; y += 1) {
+            sourceWorld.setBlock(x, y, z, 0);
+          }
+        }
+      }
+      sourceWorld.setBlock(WORLD_CONFIG.chunkSizeX + 7, 90, 7, WATER_SOURCE_BLOCK_ID);
+
+      const persistedDiffs = new Map(
+        sourceWorld.getAllDiffRecords().map((record) => [record.chunkKey, record]),
+      );
+      const eagerWorld = new World('surface-ice-catch-up', persistedDiffs);
+      const delayedWorld = new World('surface-ice-catch-up', persistedDiffs);
+
+      try {
+        eagerWorld.primeAround(0, 0, 0);
+        eagerWorld.primeAround(WORLD_CONFIG.chunkSizeX, 0, 0);
+        delayedWorld.primeAround(0, 0, 0);
+
+        const thawWeather = buildManualWeather('clear', 16);
+        for (let tick = 0; tick < 640; tick += 1) {
+          eagerWorld.tickWeatherAccumulation(8, thawWeather);
+          delayedWorld.tickWeatherAccumulation(8, thawWeather);
+        }
+
+        delayedWorld.primeAround(WORLD_CONFIG.chunkSizeX, 0, 0);
+
+        expect(Array.from(delayedWorld.getChunkByKey('1,0')!.blocks)).toEqual(
+          Array.from(eagerWorld.getChunkByKey('1,0')!.blocks),
+        );
+      } finally {
+        eagerWorld.dispose();
+        delayedWorld.dispose();
+      }
+    } finally {
+      sourceWorld.dispose();
     }
   });
 });
