@@ -2330,9 +2330,18 @@ export class StartMenu {
     }
 
     this.panel.style.setProperty('--home-center-nudge', '0px');
+    if (window.innerWidth <= 900) {
+      return;
+    }
 
     const refine = (pass: number): void => {
       if (!this.homeActionsColumn || !this.homeLeftColumn || this.currentScreen !== 'home') {
+        return;
+      }
+
+      const actionsStyle = window.getComputedStyle(this.homeActionsColumn);
+      const columnStyle = window.getComputedStyle(this.homeLeftColumn);
+      if (actionsStyle.display === 'none' || columnStyle.position !== 'fixed') {
         return;
       }
 
