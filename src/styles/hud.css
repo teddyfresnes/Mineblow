@@ -1373,6 +1373,23 @@ body.pointer-cursor-hidden * {
   background: linear-gradient(180deg, #c49a9a, #865656);
 }
 
+.menu-button {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  min-height: 44px;
+  line-height: 1.12;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.menu-button-large {
+  min-height: 52px;
+  padding-block: 14px;
+  font-size: clamp(0.95rem, 1.65vw, 1.1rem);
+}
+
 .menu-square-button {
   min-height: 52px;
   font: inherit;
@@ -2583,6 +2600,48 @@ body.pointer-cursor-hidden * {
   display: none;
 }
 
+.home-mobile-actions {
+  display: none;
+  width: min(100%, 320px);
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.home-icon-button {
+  display: grid;
+  place-items: center;
+  width: clamp(46px, 13vw, 54px);
+  height: clamp(46px, 13vw, 54px);
+  padding: 0;
+  border: 2px solid #000;
+  background: linear-gradient(180deg, #c6c6c6, #7b7b7b);
+  color: #fff;
+  cursor: pointer;
+  box-shadow:
+    inset 0 0 0 2px #a0a0a0,
+    inset 0 0 0 4px #585858;
+}
+
+.home-icon-button:hover {
+  filter: brightness(1.08);
+}
+
+.home-icon-button:active {
+  transform: translateY(1px);
+}
+
+.home-icon-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.home-icon-svg {
+  width: 24px;
+  height: 24px;
+  color: #1f1f1f;
+}
+
 .settings-view .classic-button-stack {
   width: min(920px, 100%);
   gap: 6px;
@@ -2591,18 +2650,19 @@ body.pointer-cursor-hidden * {
 
 .settings-compact-button {
   width: 100%;
-  height: 44px;
   min-height: 44px;
-  max-height: 44px;
+  height: auto;
+  max-height: none;
   justify-self: stretch;
-  padding: 0 14px;
+  padding: 10px 14px;
   font-size: 0.92rem;
-  line-height: 1;
-  white-space: nowrap;
+  line-height: 1.08;
+  white-space: normal;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .settings-buttons-grid {
@@ -2918,6 +2978,24 @@ body.pointer-cursor-hidden * {
 }
 
 @media (max-width: 900px) {
+  .classic-footer-row.two-columns,
+  .classic-footer-row.three-columns,
+  .classic-tab-row {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-line-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    align-items: start;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .stats-line-value {
+    justify-self: start;
+  }
+
   .home-right-column {
     top: 176px;
   }
@@ -2929,23 +3007,31 @@ body.pointer-cursor-hidden * {
 
   .wardrobe-view .wardrobe-layout {
     --wardrobe-side-column: 120px;
+    width: min(680px, 100%);
+    grid-template-columns: minmax(0, 1fr);
     row-gap: 16px;
+  }
+
+  .wardrobe-view .wardrobe-category-rail {
+    width: 100%;
+    padding-right: 0;
+    justify-self: stretch;
   }
 
   .wardrobe-category-list {
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    padding-right: 0;
   }
 
   .wardrobe-preview-column {
     order: 3;
-    transform: translateX(12px);
+    justify-self: center;
+    transform: none;
+    padding-top: 0;
   }
 
   .wardrobe-view .classic-footer-row.one-column {
-    width: min(
-      640px,
-      calc(100% - (var(--wardrobe-side-column) * 2) - (var(--wardrobe-column-gap) * 2))
-    );
+    width: min(420px, 100%);
   }
 
   .wardrobe-stage {
@@ -2954,9 +3040,7 @@ body.pointer-cursor-hidden * {
   }
 
   .wardrobe-preview-column {
-    justify-self: end;
     justify-content: flex-start;
-    transform: translateX(12px);
   }
 }
 
@@ -2974,11 +3058,32 @@ body.pointer-cursor-hidden * {
   }
 
   .home-right-column {
+    display: grid;
+    position: static;
+    transform: none;
+    justify-self: center;
+    gap: 12px;
+  }
+
+  .home-text-actions {
     display: none;
   }
 
+  .home-avatar-stage {
+    width: clamp(148px, 46vw, 188px);
+    height: clamp(248px, 62vw, 316px);
+  }
+
+  .wardrobe-launch-button {
+    display: none;
+  }
+
+  .home-mobile-actions {
+    display: flex;
+  }
+
   .mobile-wardrobe-button {
-    display: block;
+    display: none;
   }
 }
 
@@ -3120,10 +3225,65 @@ body.pointer-cursor-hidden * {
     left: auto !important;
     transform: none !important;
     width: min(520px, calc(100vw - 36px)) !important;
+    gap: 10px !important;
+  }
+
+  .menu-panel[data-screen='home'] .title-masthead {
+    padding: 20px 10px 0 !important;
+  }
+
+  .menu-panel[data-screen='home'] .title-masthead p {
+    margin-top: 14px !important;
+    max-width: min(420px, calc(100vw - 48px)) !important;
+    font-size: 0.92rem !important;
   }
 
   .menu-panel[data-screen='home'] .home-right-column {
+    display: grid !important;
+    position: static !important;
+    top: auto !important;
+    left: auto !important;
+    transform: none !important;
+    justify-self: center !important;
+    gap: 12px !important;
+  }
+
+  .menu-panel[data-screen='home'] .home-avatar-stage {
+    width: clamp(148px, 46vw, 188px) !important;
+    height: clamp(248px, 62vw, 316px) !important;
+  }
+
+  .menu-panel[data-screen='home'] .home-text-actions {
     display: none !important;
+  }
+
+  .menu-panel[data-screen='home'] .wardrobe-launch-button {
+    display: none !important;
+  }
+
+  .menu-panel[data-screen='home'] .home-mobile-actions {
+    display: flex !important;
+  }
+
+  .menu-panel[data-screen='home'] .mobile-wardrobe-button {
+    display: none !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .menu-panel[data-screen='home'] .home-mobile-actions {
+    gap: 6px !important;
+    width: min(100%, 286px) !important;
+  }
+
+  .menu-panel[data-screen='home'] .home-icon-button {
+    width: 46px !important;
+    height: 46px !important;
+  }
+
+  .menu-panel[data-screen='home'] .home-icon-svg {
+    width: 21px !important;
+    height: 21px !important;
   }
 }
 

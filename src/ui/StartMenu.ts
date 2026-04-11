@@ -98,6 +98,20 @@ const pickMenuQuote = (): string => {
   return MENU_QUOTES[index];
 };
 
+type HomeActionIcon = 'solo' | 'multiplayer' | 'stats' | 'settings' | 'wardrobe';
+
+const HOME_ACTION_ICON_PATHS: Record<HomeActionIcon, readonly string[]> = {
+  solo: ['M8 6l10 6-10 6V6Z'],
+  multiplayer: [
+    'M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3Zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3Zm0 2c-2.33 0-6 1.17-6 3.5V19h7v-2.5c0-1.02.47-1.93 1.27-2.67A9.78 9.78 0 0 0 8 13Zm8 0c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5Z',
+  ],
+  stats: ['M4 19h16v2H4v-2Zm2-8h3v6H6v-6Zm5-5h3v11h-3V6Zm5 8h3v3h-3v-3Z'],
+  settings: [
+    'M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.07-.94l2.03-1.58c.18-.14.23-.4.12-.61l-1.92-3.32c-.12-.22-.38-.3-.61-.22l-2.39.96a7.03 7.03 0 0 0-1.63-.94l-.36-2.54A.488.488 0 0 0 14.01 2h-4c-.24 0-.44.17-.48.41l-.36 2.54c-.59.24-1.14.54-1.65.94l-2.39-.96a.497.497 0 0 0-.61.22L2.2 8.46c-.12.21-.07.47.12.61l2.03 1.58c-.05.31-.08.65-.08.97 0 .32.03.65.08.96l-2.03 1.57a.494.494 0 0 0-.12.61l1.92 3.32c.12.22.38.3.61.22l2.39-.96c.51.39 1.06.72 1.65.94l.36 2.54c.04.24.24.41.48.41h4c.24 0 .44-.17.48-.41l.36-2.54c.58-.24 1.13-.55 1.63-.94l2.39.96c.23.09.49 0 .61-.22l1.92-3.32a.494.494 0 0 0-.12-.61l-2.01-1.57ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z',
+  ],
+  wardrobe: ['M9 3h6l2.4 2 3.1 1.4V11h-2.1v10H5.6V11H3.5V6.4L6.6 5 9 3z'],
+};
+
 export class StartMenu {
   private readonly root = document.createElement('div');
   private readonly panoramaHost = document.createElement('div');
@@ -540,7 +554,7 @@ export class StartMenu {
     masthead.append(titleBrand, subtitle);
 
     const actions = document.createElement('div');
-    actions.className = 'title-actions';
+    actions.className = 'title-actions home-text-actions';
     this.homeActionsColumn = actions;
     const mobileWardrobeButton = this.buildMainButton('homeWardrobe', () => this.showScreen('wardrobe'));
     mobileWardrobeButton.classList.add('mobile-wardrobe-button');
@@ -560,6 +574,16 @@ export class StartMenu {
     viewerStage.className = 'menu-player-stage bare-player-stage home-avatar-stage';
     this.homeSkinViewer = new SkinViewer(viewerStage, null, { animationMode: 'idle', targetFps: 60 });
 
+    const mobileActions = document.createElement('div');
+    mobileActions.className = 'home-mobile-actions';
+    mobileActions.append(
+      this.buildHomeIconButton('homeSolo', 'solo', () => this.showScreen('singleplayer')),
+      this.buildHomeIconButton('homeMultiplayerSoon', 'multiplayer', () => undefined, true),
+      this.buildHomeIconButton('homeStats', 'stats', () => this.showScreen('stats')),
+      this.buildHomeIconButton('homeSettings', 'settings', () => this.showScreen('settings')),
+      this.buildHomeIconButton('homeWardrobe', 'wardrobe', () => this.showScreen('wardrobe')),
+    );
+
     const wardrobeButton = document.createElement('button');
     wardrobeButton.type = 'button';
     wardrobeButton.className = 'wardrobe-launch-button';
@@ -567,20 +591,10 @@ export class StartMenu {
       wardrobeButton.setAttribute('aria-label', this.t('homeWardrobe'));
     });
     wardrobeButton.addEventListener('click', () => this.showScreen('wardrobe'));
-    const wardrobeIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    wardrobeIcon.setAttribute('viewBox', '0 0 24 24');
-    wardrobeIcon.setAttribute('aria-hidden', 'true');
-    wardrobeIcon.classList.add('wardrobe-launch-icon-svg');
-    const wardrobeIconPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    wardrobeIconPath.setAttribute(
-      'd',
-      'M9 3h6l2.4 2 3.1 1.4V11h-2.1v10H5.6V11H3.5V6.4L6.6 5 9 3z',
-    );
-    wardrobeIconPath.setAttribute('fill', 'currentColor');
-    wardrobeIcon.append(wardrobeIconPath);
+    const wardrobeIcon = this.createHomeActionIcon('wardrobe', 'wardrobe-launch-icon-svg');
     wardrobeButton.append(wardrobeIcon);
 
-    right.append(viewerStage, wardrobeButton);
+    right.append(viewerStage, wardrobeButton, mobileActions);
     layout.append(left, right);
     view.append(layout);
     return view;
@@ -1263,6 +1277,40 @@ export class StartMenu {
     button.disabled = disabled;
     button.addEventListener('click', onClick);
     return button;
+  }
+
+  private buildHomeIconButton(
+    labelKey: MenuMessageKey,
+    icon: HomeActionIcon,
+    onClick: () => void,
+    disabled = false,
+  ): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'home-icon-button';
+    button.disabled = disabled;
+    this.registerLocalized(() => {
+      const label = this.t(labelKey);
+      button.setAttribute('aria-label', label);
+      button.title = label;
+    });
+    button.addEventListener('click', onClick);
+    button.append(this.createHomeActionIcon(icon, 'home-icon-svg'));
+    return button;
+  }
+
+  private createHomeActionIcon(icon: HomeActionIcon, className: string): SVGSVGElement {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.classList.add(className);
+    for (const pathValue of HOME_ACTION_ICON_PATHS[icon]) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', pathValue);
+      path.setAttribute('fill', 'currentColor');
+      svg.append(path);
+    }
+    return svg;
   }
 
   private showScreen(screen: MenuScreen): void {
@@ -2289,6 +2337,9 @@ export class StartMenu {
       }
 
       const rect = this.homeActionsColumn.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        return;
+      }
       const currentCenter = rect.left + rect.width / 2;
       const targetCenter = window.innerWidth / 2;
       const delta = targetCenter - currentCenter;
