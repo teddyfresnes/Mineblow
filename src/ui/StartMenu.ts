@@ -5,8 +5,6 @@ import {
   cloneBindings,
   createDefaultSettings,
   getControlLabel,
-  getInterfaceZoomPercent,
-  getNextInterfaceSize,
   formatKeyCode,
   normalizeRenderDistanceChunks,
   type ControlAction,
@@ -138,7 +136,6 @@ export class StartMenu {
   private readonly deleteWorldButton = document.createElement('button');
   private readonly saveEditWorldButton = document.createElement('button');
   private readonly startupFullscreenToggleButton = document.createElement('button');
-  private readonly interfaceSizeToggleButton = document.createElement('button');
   private readonly developerDebugModeToggleButton = document.createElement('button');
   private readonly renderDistanceSlider = document.createElement('input');
   private readonly renderDistanceValue = document.createElement('div');
@@ -964,16 +961,6 @@ export class StartMenu {
       this.emitSettingsChange();
     });
 
-    this.interfaceSizeToggleButton.type = 'button';
-    this.interfaceSizeToggleButton.className = 'menu-button settings-compact-button';
-    this.interfaceSizeToggleButton.addEventListener('click', () => {
-      this.settings = this.createSettingsSnapshot({
-        interfaceSize: getNextInterfaceSize(this.settings.interfaceSize),
-      });
-      this.renderGraphicsView();
-      this.emitSettingsChange();
-    });
-
     this.developerDebugModeToggleButton.type = 'button';
     this.developerDebugModeToggleButton.className = 'menu-button settings-compact-button';
     this.developerDebugModeToggleButton.addEventListener('click', () => {
@@ -988,7 +975,6 @@ export class StartMenu {
 
     stack.append(
       this.startupFullscreenToggleButton,
-      this.interfaceSizeToggleButton,
       this.developerDebugModeToggleButton,
     );
 
@@ -1557,8 +1543,6 @@ export class StartMenu {
     this.startupFullscreenToggleButton.textContent = `${this.t('fullscreen')}: ${
       this.settings.startFullscreen ? this.t('stateOn') : this.t('stateOff')
     }`;
-    const zoom = getInterfaceZoomPercent(this.settings.interfaceSize);
-    this.interfaceSizeToggleButton.textContent = `${this.t('interfaceSize')}: ${this.settings.interfaceSize} (${zoom}%)`;
     this.developerDebugModeToggleButton.textContent = `${this.t('developerDebugMode')}: ${
       this.settings.developerDebugMode ? this.t('stateOn') : this.t('stateOff')
     }`;

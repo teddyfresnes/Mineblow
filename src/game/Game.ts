@@ -1,9 +1,9 @@
 import { PLAYER_CONFIG, SAVE_CONFIG, WORLD_CONFIG } from './Config';
 import {
+  DEFAULT_INTERFACE_SIZE,
   cloneBindings,
   createDefaultSettings,
   getInterfaceZoomPercent,
-  normalizeInterfaceSize,
   normalizeRenderDistanceChunks,
   type GameSettings,
 } from './Controls';
@@ -2483,7 +2483,7 @@ export class Game {
       keyBindings,
       skinDataUrl: settings.skinDataUrl,
       startFullscreen: settings.startFullscreen,
-      interfaceSize: normalizeInterfaceSize(settings.interfaceSize),
+      interfaceSize: DEFAULT_INTERFACE_SIZE,
       language: settings.language,
       developerDebugMode: settings.developerDebugMode,
       renderDistanceChunks: normalizeRenderDistanceChunks(settings.renderDistanceChunks),
