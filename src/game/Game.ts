@@ -100,6 +100,14 @@ interface UnderwaterViewState {
   depth: number;
 }
 
+interface WorldLoadingPatternState {
+  columns: number;
+  rows: number;
+  cells: number[];
+  revealOrder: number[];
+  startedAtMs: number;
+}
+
 const EMPTY_CURSOR: InventorySlot = {
   blockId: null,
   count: 0,
@@ -139,6 +147,25 @@ const CHAT_CLOCK_HOUR_MAX = 24;
 const CHAT_MOON_PHASE_MIN = 1;
 const CHAT_MOON_PHASE_MAX = MOON_PHASE_COUNT;
 const SUNRISE_CLOCK_HOUR = 8;
+const WORLD_LOADING_PATTERN_COLUMNS = 28;
+const WORLD_LOADING_PATTERN_ROWS = 18;
+const WORLD_LOADING_PATTERN_PIXEL_SIZE = 6;
+const WORLD_LOADING_PATTERN_PREVIEW_LEAD_CELLS = 12;
+const WORLD_LOADING_PATTERN_PLACEHOLDER_COLOR = '#14181d';
+const WORLD_LOADING_PATTERN_SCAN_WIDTH = 18;
+const WORLD_LOADING_PATTERN_PALETTE = [
+  '#6c9eff',
+  '#b9dcff',
+  '#fff0b2',
+  '#4d8c3c',
+  '#694f39',
+  '#72777d',
+  '#4f79c8',
+  '#f3f6fb',
+  '#2d6f34',
+  '#5f4530',
+  '#d0b27d',
+] as const;
 
 export class Game {
   private readonly shell = document.createElement('div');
@@ -150,6 +177,8 @@ export class Game {
   private readonly introSplashLoader = document.createElement('div');
   private readonly worldLoadingOverlay = document.createElement('div');
   private readonly worldLoadingCard = document.createElement('div');
+  private readonly worldLoadingPreview = document.createElement('div');
+  private readonly worldLoadingPreviewCanvas = document.createElement('canvas');
   private readonly worldLoadingSpinner = document.createElement('div');
   private readonly worldLoadingLabel = document.createElement('div');
   private readonly worldLoadingStatus = document.createElement('div');
@@ -202,6 +231,9 @@ export class Game {
   private pendingWorldPreviewCapture: { worldId: string; framesRemaining: number } | null = null;
   private readonly droppedItems = new Map<string, DroppedItem>();
   private worldTransitionPending = false;
+  private worldLoadingProgressValue = 0;
+  private worldLoadingPatternState: WorldLoadingPatternState | null = null;
+  private worldLoadingAnimationFrameId: number | null = null;
   private hotbarDirty = false;
   private timeOfDay = 0;
   private moonPhase = 0;
@@ -226,6 +258,14 @@ export class Game {
     this.worldLoadingOverlay.className = 'world-loading-overlay';
     this.worldLoadingOverlay.setAttribute('aria-hidden', 'true');
     this.worldLoadingCard.className = 'world-loading-card';
+    this.worldLoadingPreview.className = 'world-loading-preview';
+    this.worldLoadingPreviewCanvas.className = 'world-loading-preview-canvas';
+    this.worldLoadingPreviewCanvas.width = WORLD_LOADING_PATTERN_COLUMNS * WORLD_LOADING_PATTERN_PIXEL_SIZE;
+    this.worldLoadingPreviewCanvas.height = WORLD_LOADING_PATTERN_ROWS * WORLD_LOADING_PATTERN_PIXEL_SIZE;
+    const worldLoadingPreviewContext = this.worldLoadingPreviewCanvas.getContext('2d');
+    if (worldLoadingPreviewContext) {
+      worldLoadingPreviewContext.imageSmoothingEnabled = false;
+    }
     this.worldLoadingSpinner.className = 'world-loading-spinner';
     this.worldLoadingSpinner.setAttribute('aria-hidden', 'true');
     this.worldLoadingLabel.className = 'world-loading-label';
@@ -233,8 +273,9 @@ export class Game {
     this.worldLoadingProgress.className = 'world-loading-progress';
     this.worldLoadingProgressFill.className = 'world-loading-progress-fill';
     this.worldLoadingProgress.append(this.worldLoadingProgressFill);
+    this.worldLoadingPreview.append(this.worldLoadingPreviewCanvas, this.worldLoadingSpinner);
     this.worldLoadingCard.append(
-      this.worldLoadingSpinner,
+      this.worldLoadingPreview,
       this.worldLoadingLabel,
       this.worldLoadingStatus,
       this.worldLoadingProgress,
@@ -288,10 +329,13 @@ export class Game {
     });
     this.menu = new StartMenu(this.shell, {
       onPlayWorld: (worldId) => {
-        void this.runMenuWorldTransition(() => this.loadWorld(worldId));
+        void this.runMenuWorldTransition(() => this.loadWorld(worldId, false), `join:${worldId}`);
       },
       onCreateWorld: (name, seed) => {
-        void this.runMenuWorldTransition(() => this.startNewWorld(name, seed));
+        void this.runMenuWorldTransition(
+          () => this.startNewWorld(name, seed, false),
+          `create:${name}:${seed}`,
+        );
       },
       onRenameWorld: (worldId, name) => {
         void this.renameWorld(worldId, name);
@@ -356,6 +400,7 @@ export class Game {
     }
 
     this.settings = settings;
+    this.renderer.setRenderDistanceChunks(this.settings.renderDistanceChunks);
     setCurrentLanguage(this.settings.language);
     this.applyInterfaceZoom(this.settings.interfaceSize);
     this.globalStats = globalStats;
@@ -390,13 +435,13 @@ export class Game {
     }
   }
 
-  private async runMenuWorldTransition(run: () => Promise<void>): Promise<void> {
+  private async runMenuWorldTransition(run: () => Promise<void>, patternSeed = ''): Promise<void> {
     if (this.worldTransitionPending) {
       return;
     }
 
     this.worldTransitionPending = true;
-    this.showWorldLoadingOverlay();
+    this.showWorldLoadingOverlay(patternSeed);
     await this.waitForNextPaint();
     try {
       await run();
@@ -406,14 +451,19 @@ export class Game {
     }
   }
 
-  private showWorldLoadingOverlay(): void {
+  private showWorldLoadingOverlay(patternSeed = ''): void {
     this.updateWorldLoadingLabel();
-    this.setWorldLoadingProgress(0);
+    this.startWorldLoadingPreview(patternSeed);
+    this.setWorldLoadingProgress(
+      0,
+      translate('menu.loadingWorldPreparing', {}, this.settings.language),
+    );
     this.worldLoadingOverlay.classList.add('active');
     this.worldLoadingOverlay.setAttribute('aria-hidden', 'false');
   }
 
   private hideWorldLoadingOverlay(): void {
+    this.stopWorldLoadingPreview();
     this.worldLoadingOverlay.classList.remove('active');
     this.worldLoadingOverlay.setAttribute('aria-hidden', 'true');
   }
@@ -421,12 +471,13 @@ export class Game {
   private updateWorldLoadingLabel(): void {
     this.worldLoadingLabel.textContent = translate('menu.loadingWorld', {}, this.settings.language);
     if (!this.worldLoadingStatus.textContent) {
-      this.worldLoadingStatus.textContent = '0%';
+      this.worldLoadingStatus.textContent = translate('menu.loadingWorldPreparing', {}, this.settings.language);
     }
   }
 
   private setWorldLoadingProgress(progress: number, detail?: string): void {
     const clamped = Math.max(0, Math.min(1, progress));
+    this.worldLoadingProgressValue = clamped;
     this.worldLoadingProgressFill.style.transform = `scaleX(${clamped})`;
     this.worldLoadingStatus.textContent =
       detail ?? `${Math.max(0, Math.min(100, Math.round(clamped * 100)))}%`;
@@ -436,37 +487,269 @@ export class Game {
     const desired = world.getDesiredChunkCount();
     const loaded = world.getLoadedDesiredChunkCount();
     const progress = world.getStreamingProgress();
-    const detail =
-      desired > 0
-        ? `${loaded}/${desired} · ${Math.max(0, Math.min(100, Math.round(progress * 100)))}%`
-        : `${Math.max(0, Math.min(100, Math.round(progress * 100)))}%`;
-    this.setWorldLoadingProgress(progress, detail);
+    if (desired > 0) {
+      this.setWorldLoadingProgress(
+        progress,
+        translate(
+          'menu.loadingWorldChunks',
+          {
+            loaded: String(loaded),
+            total: String(desired),
+            percent: String(Math.max(0, Math.min(100, Math.round(progress * 100)))),
+          },
+          this.settings.language,
+        ),
+      );
+      return;
+    }
+    this.setWorldLoadingProgress(
+      progress,
+      translate('menu.loadingWorldPreparing', {}, this.settings.language),
+    );
   }
-
   private async preloadSessionWorld(session: Session): Promise<void> {
     const [playerX, , playerZ] = session.player.getPosition();
     const world = session.world;
     world.enqueueStreamingAround(playerX, playerZ);
     this.updateWorldLoadingProgress(world);
     await this.waitForNextPaint();
-
     while (!world.isDesiredRegionReady()) {
       world.processGenerationBudget(WORLD_PRELOAD_GENERATION_BUDGET);
       this.syncChunkMeshes(CHUNK_MESH_PRELOAD_SYNC_BUDGET_MS);
       this.updateWorldLoadingProgress(world);
       await this.waitForNextPaint();
     }
-
     this.syncChunkMeshes(CHUNK_MESH_PRELOAD_SYNC_BUDGET_MS);
-    this.setWorldLoadingProgress(1, `${world.getDesiredChunkCount()}/${world.getDesiredChunkCount()} · 100%`);
+    this.setWorldLoadingProgress(1, translate('menu.loadingWorldReady', {}, this.settings.language));
+  }
+  private startWorldLoadingPreview(patternSeed: string): void {
+    this.stopWorldLoadingPreview();
+    this.worldLoadingProgressValue = 0;
+    this.worldLoadingPatternState = this.createWorldLoadingPattern(patternSeed);
+
+    const renderFrame = (timestamp: number): void => {
+      if (!this.worldLoadingPatternState) {
+        this.worldLoadingAnimationFrameId = null;
+        return;
+      }
+
+      this.renderWorldLoadingPreview(timestamp);
+      this.worldLoadingAnimationFrameId = window.requestAnimationFrame(renderFrame);
+    };
+
+    this.worldLoadingAnimationFrameId = window.requestAnimationFrame(renderFrame);
+  }
+
+  private stopWorldLoadingPreview(): void {
+    if (this.worldLoadingAnimationFrameId !== null) {
+      window.cancelAnimationFrame(this.worldLoadingAnimationFrameId);
+      this.worldLoadingAnimationFrameId = null;
+    }
+
+    this.worldLoadingPatternState = null;
+    const context = this.worldLoadingPreviewCanvas.getContext('2d');
+    if (context) {
+      context.clearRect(0, 0, this.worldLoadingPreviewCanvas.width, this.worldLoadingPreviewCanvas.height);
+    }
+  }
+
+  private renderWorldLoadingPreview(now: number): void {
+    const pattern = this.worldLoadingPatternState;
+    const context = this.worldLoadingPreviewCanvas.getContext('2d');
+    if (!pattern || !context) {
+      return;
+    }
+
+    const totalCells = pattern.cells.length;
+    const revealedCells = Math.floor(this.worldLoadingProgressValue * totalCells);
+    const previewCells = Math.min(totalCells, revealedCells + WORLD_LOADING_PATTERN_PREVIEW_LEAD_CELLS);
+    const width = this.worldLoadingPreviewCanvas.width;
+    const height = this.worldLoadingPreviewCanvas.height;
+
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = WORLD_LOADING_PATTERN_PLACEHOLDER_COLOR;
+    context.fillRect(0, 0, width, height);
+
+    for (let orderIndex = 0; orderIndex < totalCells; orderIndex += 1) {
+      const cellIndex = pattern.revealOrder[orderIndex] ?? 0;
+      const x = (cellIndex % pattern.columns) * WORLD_LOADING_PATTERN_PIXEL_SIZE;
+      const y = Math.floor(cellIndex / pattern.columns) * WORLD_LOADING_PATTERN_PIXEL_SIZE;
+
+      if (orderIndex >= previewCells) {
+        context.fillStyle = WORLD_LOADING_PATTERN_PLACEHOLDER_COLOR;
+        context.fillRect(x, y, WORLD_LOADING_PATTERN_PIXEL_SIZE, WORLD_LOADING_PATTERN_PIXEL_SIZE);
+        continue;
+      }
+
+      const paletteIndex = pattern.cells[cellIndex] ?? 0;
+      const color = WORLD_LOADING_PATTERN_PALETTE[paletteIndex] ?? WORLD_LOADING_PATTERN_PALETTE[0];
+      if (orderIndex < revealedCells) {
+        context.globalAlpha = 1;
+      } else {
+        const pulse = 0.24 + 0.14 * (0.5 + 0.5 * Math.sin((now - pattern.startedAtMs) * 0.015 + orderIndex));
+        context.globalAlpha = pulse;
+      }
+      context.fillStyle = color;
+      context.fillRect(x, y, WORLD_LOADING_PATTERN_PIXEL_SIZE, WORLD_LOADING_PATTERN_PIXEL_SIZE);
+    }
+
+    context.globalAlpha = 1;
+    const scanOffset =
+      ((now - pattern.startedAtMs) * 0.08) % (width + WORLD_LOADING_PATTERN_SCAN_WIDTH * 2) -
+      WORLD_LOADING_PATTERN_SCAN_WIDTH;
+    const scanGradient = context.createLinearGradient(
+      scanOffset,
+      0,
+      scanOffset + WORLD_LOADING_PATTERN_SCAN_WIDTH,
+      0,
+    );
+    scanGradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    scanGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.16)');
+    scanGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    context.fillStyle = scanGradient;
+    context.fillRect(scanOffset, 0, WORLD_LOADING_PATTERN_SCAN_WIDTH, height);
+  }
+
+  private createWorldLoadingPattern(patternSeed: string): WorldLoadingPatternState {
+    const columns = WORLD_LOADING_PATTERN_COLUMNS;
+    const rows = WORLD_LOADING_PATTERN_ROWS;
+    const random = this.createSeededRandom(
+      `world-loading:${patternSeed}:${Date.now()}:${Math.random().toFixed(6)}`,
+    );
+    const cells = new Array<number>(columns * rows).fill(0);
+
+    const setCell = (x: number, y: number, paletteIndex: number): void => {
+      if (x < 0 || x >= columns || y < 0 || y >= rows) {
+        return;
+      }
+      cells[y * columns + x] = paletteIndex;
+    };
+
+    for (let y = 0; y < rows; y += 1) {
+      const skyPalette = y < Math.floor(rows * 0.48) ? 0 : 1;
+      for (let x = 0; x < columns; x += 1) {
+        setCell(x, y, skyPalette);
+      }
+    }
+
+    const sunX = 3 + Math.floor(random() * Math.max(1, columns - 6));
+    const sunY = 2 + Math.floor(random() * 3);
+    for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+      for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+        if (Math.abs(offsetX) + Math.abs(offsetY) > 2) {
+          continue;
+        }
+        setCell(sunX + offsetX, sunY + offsetY, 2);
+      }
+    }
+
+    const cloudCount = 2 + Math.floor(random() * 2);
+    for (let cloudIndex = 0; cloudIndex < cloudCount; cloudIndex += 1) {
+      const cloudWidth = 4 + Math.floor(random() * 5);
+      const cloudX = Math.floor(random() * Math.max(1, columns - cloudWidth));
+      const cloudY = 1 + Math.floor(random() * 5);
+      for (let x = 0; x < cloudWidth; x += 1) {
+        if (random() > 0.82) {
+          continue;
+        }
+        setCell(cloudX + x, cloudY, 7);
+        if (x > 0 && x < cloudWidth - 1 && random() > 0.42) {
+          setCell(cloudX + x, cloudY + 1, 7);
+        }
+      }
+    }
+
+    const waterline = Math.floor(rows * 0.67);
+    let terrainTop = waterline - 2 - Math.floor(random() * 3);
+    const terrainHeights: number[] = [];
+
+    for (let x = 0; x < columns; x += 1) {
+      terrainTop += Math.floor(random() * 3) - 1;
+      terrainTop = Math.max(waterline - 3, Math.min(rows - 5, terrainTop));
+      terrainHeights[x] = terrainTop;
+
+      if (terrainTop >= waterline) {
+        setCell(x, terrainTop, 3);
+        for (let y = terrainTop + 1; y < rows; y += 1) {
+          const depth = y - terrainTop;
+          setCell(x, y, depth >= 3 || random() > 0.82 ? 5 : 4);
+        }
+        continue;
+      }
+
+      setCell(x, terrainTop, 10);
+      for (let y = terrainTop + 1; y <= waterline; y += 1) {
+        setCell(x, y, 6);
+      }
+      for (let y = waterline + 1; y < rows; y += 1) {
+        setCell(x, y, 4);
+      }
+    }
+
+    for (let x = 2; x < columns - 2; x += 1) {
+      const terrainHeight = terrainHeights[x] ?? waterline;
+      if (terrainHeight >= waterline - 1 || random() < 0.8) {
+        continue;
+      }
+
+      const trunkHeight = 2 + Math.floor(random() * 2);
+      for (let step = 1; step <= trunkHeight; step += 1) {
+        setCell(x, terrainHeight - step, 9);
+      }
+
+      const canopyTop = terrainHeight - trunkHeight - 1;
+      for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+        for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+          if (Math.abs(offsetX) === 1 && offsetY === -1 && random() > 0.35) {
+            continue;
+          }
+          setCell(x + offsetX, canopyTop + offsetY, 8);
+        }
+      }
+      setCell(x, canopyTop - 1, 8);
+    }
+
+    const revealOrder = Array.from({ length: cells.length }, (_, index) => index);
+    for (let index = revealOrder.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(random() * (index + 1));
+      const current = revealOrder[index] ?? index;
+      revealOrder[index] = revealOrder[swapIndex] ?? swapIndex;
+      revealOrder[swapIndex] = current;
+    }
+
+    return {
+      columns,
+      rows,
+      cells,
+      revealOrder,
+      startedAtMs: performance.now(),
+    };
+  }
+
+  private createSeededRandom(source: string): () => number {
+    let hash = 2166136261;
+    for (let index = 0; index < source.length; index += 1) {
+      hash ^= source.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+
+    let state = hash >>> 0;
+    return () => {
+      state += 0x6d2b79f5;
+      let value = state;
+      value = Math.imul(value ^ (value >>> 15), value | 1);
+      value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+      return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+    };
   }
 
   private async waitForNextPaint(): Promise<void> {
     await new Promise<void>((resolve) => {
-      window.requestAnimationFrame(() => resolve());
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => resolve());
+      });
     });
   }
-
   private disposeSessionWorld(session: Session | null): void {
     session?.world.dispose();
   }
@@ -588,7 +871,7 @@ export class Game {
   private async startNewWorld(
     nameInput: string,
     seedInput: string,
-    openPauseOnPointerLockFailure = true,
+    openPauseOnPointerLockFailure = false,
   ): Promise<void> {
     const seed =
       seedInput.trim() ||
@@ -633,7 +916,7 @@ export class Game {
     }, openPauseOnPointerLockFailure);
   }
 
-  private async loadWorld(worldId: string): Promise<void> {
+  private async loadWorld(worldId: string, openPauseOnPointerLockFailure = false): Promise<void> {
     const loaded = await this.saveRepository.loadWorld(worldId);
     if (!loaded) {
       await this.refreshMenuWorlds();
@@ -642,12 +925,12 @@ export class Game {
     }
 
     this.renderer.clearChunks();
-    await this.activateLoadedWorld(loaded);
+    await this.activateLoadedWorld(loaded, openPauseOnPointerLockFailure);
   }
 
   private async activateLoadedWorld(
     loaded: LoadedWorld,
-    openPauseOnPointerLockFailure = true,
+    openPauseOnPointerLockFailure = false,
   ): Promise<void> {
     const world = new World(
       loaded.save.seed,
@@ -674,7 +957,7 @@ export class Game {
 
   private async activateSession(
     session: Session,
-    openPauseOnPointerLockFailure = true,
+    openPauseOnPointerLockFailure = false,
   ): Promise<void> {
     const previousSession = this.session;
     if (previousSession && previousSession !== session) {
@@ -758,7 +1041,10 @@ export class Game {
       this.updatePauseMenuSnapshot();
       this.menu.showPause();
       this.hud.setVisible(false);
+      return;
     }
+
+    this.updatePointerUnlockPromptVisibility();
   }
 
   private update(dt: number): void {
@@ -2139,6 +2425,7 @@ export class Game {
       window.clearTimeout(this.entryGateDelayTimeoutId);
       this.entryGateDelayTimeoutId = null;
     }
+    this.stopWorldLoadingPreview();
     this.stopMenuMusic();
     void this.flushSaves();
   }
@@ -2749,3 +3036,4 @@ export class Game {
     }
   }
 }
+

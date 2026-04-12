@@ -93,13 +93,6 @@ export class SkyDome {
           float h = dir.y * 0.5 + 0.5;
           vec3 color = mix(bottomColor, horizonColor, smoothstep(0.0, 0.45, h));
           color = mix(color, topColor, smoothstep(0.45, 1.0, h));
-          float sunDot = max(dot(dir, normalize(sunDirection)), 0.0);
-          float sunGlow = smoothstep(0.985, 0.9992, sunDot);
-          float halo = pow(sunDot, 26.0);
-          float rays = pow(sunDot, 9.0) * (0.5 + 0.5 * sin(atan(dir.x - sunDirection.x, dir.y - sunDirection.y) * 16.0));
-          color += vec3(1.0, 0.88, 0.62) * sunGlow * 0.12 * sunIntensity;
-          color += vec3(1.0, 0.82, 0.48) * halo * 0.24 * sunIntensity;
-          color += vec3(1.0, 0.86, 0.65) * rays * 0.06 * sunIntensity;
           gl_FragColor = vec4(color, 1.0);
         }
       `,
