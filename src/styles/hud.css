@@ -3457,6 +3457,190 @@ body.pointer-cursor-hidden * {
   }
 }
 
+/* Responsive menu shell: use viewport space better on wide displays and keep
+   headers/footers visible on short screens by scrolling the middle content. */
+.menu-layer {
+  --menu-shell-gutter-inline: clamp(8px, 1.4vw, 24px);
+  --menu-shell-gutter-block: clamp(8px, 1.4dvh, 22px);
+  --menu-shell-inline: min(94vw, 1720px);
+  --menu-shell-block: min(94dvh, 1180px);
+  --menu-classic-inline: min(100%, clamp(1040px, 82vw, 1540px));
+  --menu-classic-form-inline: min(100%, clamp(680px, 64vw, 1180px));
+  --menu-footer-inline: min(100%, clamp(560px, 58vw, 920px));
+  padding: var(--menu-shell-gutter-block) var(--menu-shell-gutter-inline);
+}
+
+.menu-panel {
+  width: min(var(--menu-shell-inline), calc(100vw - var(--menu-shell-gutter-inline) * 2));
+  height: min(var(--menu-shell-block), calc(100dvh - var(--menu-shell-gutter-block) * 2));
+  min-height: 0;
+  max-height: calc(100dvh - var(--menu-shell-gutter-block) * 2);
+  overflow: hidden;
+  align-items: stretch;
+  justify-items: center;
+}
+
+.menu-view {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+}
+
+.menu-view-classic {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-content: stretch;
+  justify-items: center;
+  gap: clamp(10px, 1.4dvh, 18px);
+  overflow: hidden;
+}
+
+.classic-screen-header,
+.classic-screen-frame,
+.classic-footer-stack {
+  width: var(--menu-classic-inline);
+  max-width: 100%;
+}
+
+.classic-footer-row {
+  width: var(--menu-footer-inline);
+  max-width: 100%;
+}
+
+.classic-form-card,
+.world-edit-card,
+.classic-button-stack {
+  width: var(--menu-classic-form-inline);
+  max-width: 100%;
+}
+
+.settings-view .classic-button-stack,
+.settings-buttons-grid {
+  width: min(100%, clamp(720px, 70vw, 1280px));
+}
+
+.graphics-options-stack,
+.performance-options-stack,
+.languages-view .graphics-options-stack {
+  width: min(100%, clamp(560px, 56vw, 880px));
+}
+
+.classic-screen-frame {
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  align-content: start;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+}
+
+.world-select-frame,
+.keybindings-screen-frame {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.stats-screen-frame {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.minecraft-world-list,
+.binding-list,
+.stats-line-list {
+  min-height: 0;
+  height: 100%;
+  max-height: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.singleplayer-view .classic-footer-stack {
+  margin-bottom: 0;
+}
+
+@media (min-width: 1600px) {
+  .menu-layer {
+    --menu-shell-inline: min(95vw, 1840px);
+    --menu-classic-inline: min(100%, 1620px);
+    --menu-classic-form-inline: min(100%, 1260px);
+    --menu-footer-inline: min(100%, 980px);
+  }
+}
+
+@media (max-width: 1024px), (max-height: 840px) {
+  .menu-layer {
+    --menu-shell-gutter-inline: clamp(6px, 1.4vw, 14px);
+    --menu-shell-gutter-block: clamp(6px, 1.4dvh, 12px);
+    --menu-shell-inline: calc(100vw - var(--menu-shell-gutter-inline) * 2);
+    --menu-shell-block: calc(100dvh - var(--menu-shell-gutter-block) * 2);
+    --menu-classic-inline: 100%;
+    --menu-classic-form-inline: min(100%, 960px);
+    --menu-footer-inline: min(100%, 760px);
+  }
+
+  .menu-panel {
+    height: calc(100dvh - var(--menu-shell-gutter-block) * 2) !important;
+    max-height: calc(100dvh - var(--menu-shell-gutter-block) * 2) !important;
+    min-height: 0 !important;
+    padding-block: clamp(10px, 2.2dvh, 16px) !important;
+  }
+
+  .menu-view-classic {
+    gap: clamp(8px, 1.1dvh, 14px);
+  }
+
+  .classic-screen-title,
+  .classic-title-text {
+    font-size: clamp(1.02rem, 2.5vw, 1.6rem) !important;
+  }
+
+  .classic-screen-subtitle {
+    font-size: clamp(0.78rem, 1.8vw, 0.94rem);
+  }
+
+  .classic-screen-frame {
+    padding: clamp(10px, 2.2vw, 16px) !important;
+  }
+
+  .world-entry-detail strong {
+    font-size: clamp(1.08rem, 2.3vw, 1.3rem);
+  }
+
+  .world-entry-detail span,
+  .stats-line-value,
+  .stats-line-label,
+  .binding-label {
+    font-size: clamp(0.8rem, 1.7vw, 0.95rem);
+  }
+}
+
+@media (max-height: 760px) {
+  .menu-panel {
+    padding: clamp(8px, 1.6vw, 12px) !important;
+  }
+
+  .classic-screen-header {
+    gap: 6px;
+  }
+
+  .classic-screen-frame {
+    padding: clamp(8px, 1.8vw, 12px) !important;
+  }
+
+  .menu-button,
+  .settings-compact-button,
+  .binding-button {
+    min-height: 40px;
+  }
+
+  .classic-input-group input {
+    min-height: 46px;
+  }
+}
+
 /* Inventory layout lock: centered panel, fixed top-aligned slot rows, no adaptive vertical spacing */
 .inventory-layer {
   position: absolute;
