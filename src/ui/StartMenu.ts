@@ -154,6 +154,7 @@ export class StartMenu {
   private readonly wardrobeEmptyLabel = document.createElement('div');
   private readonly wardrobeSkinName = document.createElement('div');
   private readonly wardrobeValidateButton = document.createElement('button');
+  private readonly wardrobeMobileValidateButton = document.createElement('button');
   private readonly pauseTitle = document.createElement('h2');
   private readonly pauseMeta = document.createElement('div');
   private homeSkinViewer!: SkinViewer;
@@ -1203,23 +1204,35 @@ export class StartMenu {
     this.wardrobeSkinViewer = new SkinViewer(stage, null, { animationMode: 'idle', targetFps: 60 });
     this.wardrobeSkinName.className = 'wardrobe-skin-name';
     this.wardrobeValidateButton.type = 'button';
-    this.wardrobeValidateButton.className = 'menu-button wardrobe-validate-button';
+    this.wardrobeValidateButton.className = 'menu-button wardrobe-validate-button wardrobe-validate-button-desktop';
     this.localizeText(this.wardrobeValidateButton, 'validate');
     this.wardrobeValidateButton.addEventListener('click', () => this.applyWardrobePendingSelection());
     previewWell.append(stage, this.wardrobeSkinName, this.wardrobeValidateButton);
     layout.append(categoryRail, galleryWell, previewWell);
 
     const footer = document.createElement('div');
-    footer.className = 'classic-footer-row one-column';
+    footer.className = 'classic-footer-stack wardrobe-footer-stack';
+
+    const validateRow = document.createElement('div');
+    validateRow.className = 'classic-footer-row one-column wardrobe-footer-row wardrobe-mobile-validate-row';
+    this.wardrobeMobileValidateButton.type = 'button';
+    this.wardrobeMobileValidateButton.className = 'menu-button wardrobe-validate-button wardrobe-validate-button-mobile';
+    this.localizeText(this.wardrobeMobileValidateButton, 'validate');
+    this.wardrobeMobileValidateButton.addEventListener('click', () => this.applyWardrobePendingSelection());
+    validateRow.append(this.wardrobeMobileValidateButton);
+
+    const backRow = document.createElement('div');
+    backRow.className = 'classic-footer-row one-column wardrobe-footer-row';
     const backButton = document.createElement('button');
     backButton.type = 'button';
-    backButton.className = 'menu-button secondary';
+    backButton.className = 'menu-button secondary wardrobe-back-button';
     this.localizeText(backButton, 'back');
     backButton.addEventListener('click', () => {
       this.discardWardrobePendingSelection();
       this.showScreen('home');
     });
-    footer.append(backButton);
+    backRow.append(backButton);
+    footer.append(validateRow, backRow);
 
     view.append(layout, footer);
     return view;
@@ -2224,6 +2237,10 @@ export class StartMenu {
       this.wardrobePendingSkinName = this.wardrobePendingImportedSkinName;
       return this.wardrobePendingImportedSkinName;
     }
+    if (selectedUrl === this.selectedSkinUrl && this.selectedSkinName) {
+      this.wardrobePendingSkinName = this.selectedSkinName;
+      return this.selectedSkinName;
+    }
     this.wardrobePendingSkinName = this.t('importedSkin');
     return this.t('importedSkin');
   }
@@ -2248,6 +2265,8 @@ export class StartMenu {
 
   private syncSkinSelectionFromSettings(): void {
     const selectedUrl = this.settings.skinDataUrl;
+    const previousSelectedUrl = this.selectedSkinUrl;
+    const previousSelectedSkinName = this.selectedSkinName;
     this.selectedSkinUrl = selectedUrl;
 
     if (!selectedUrl) {
@@ -2265,6 +2284,18 @@ export class StartMenu {
 
     if (this.importedSkinName) {
       this.selectedSkinName = this.importedSkinName;
+      return;
+    }
+
+    if (
+      selectedUrl === previousSelectedUrl &&
+      previousSelectedSkinName &&
+      previousSelectedSkinName !== this.t('defaultSkin')
+    ) {
+      this.selectedSkinName = previousSelectedSkinName;
+      if (previousSelectedSkinName !== this.t('importedSkin')) {
+        this.importedSkinName = previousSelectedSkinName;
+      }
     } else {
       this.selectedSkinName = this.t('importedSkin');
     }
@@ -2286,7 +2317,9 @@ export class StartMenu {
   }
 
   private updateWardrobeValidateButton(): void {
-    this.wardrobeValidateButton.disabled = !this.hasWardrobePendingChanges();
+    const disabled = !this.hasWardrobePendingChanges();
+    this.wardrobeValidateButton.disabled = disabled;
+    this.wardrobeMobileValidateButton.disabled = disabled;
   }
 
   private applyWardrobePendingSelection(): void {
@@ -2394,6 +2427,12 @@ export class StartMenu {
     if (!skinDataUrl) {
       this.importedSkinName = null;
       this.selectedSkinName = this.t('defaultSkin');
+    } else if (
+      !findCatalogSkinByUrl(skinDataUrl) &&
+      this.selectedSkinName &&
+      this.selectedSkinName !== this.t('importedSkin')
+    ) {
+      this.importedSkinName = this.selectedSkinName;
     }
     this.settings = this.createSettingsSnapshot({ skinDataUrl });
     this.emitSettingsChange();
