@@ -40,6 +40,8 @@ const fr = {
     fullscreen: 'Plein ecran au demarrage',
     interfaceSize: 'Taille interface',
     renderDistance: "Distance d'affichage",
+    waterAnimation: "Animation de l'eau",
+    clouds: 'Nuages',
     developerDebugMode: 'Mode debug developpeur',
     developerDebugWarning:
       'Le mode debug saute le menu et charge automatiquement le dernier monde a chaque lancement. Continuer ?',
@@ -286,6 +288,8 @@ const en: MessageCatalog = {
     fullscreen: 'Fullscreen at startup',
     interfaceSize: 'Interface Size',
     renderDistance: 'Render Distance',
+    waterAnimation: 'Water Animation',
+    clouds: 'Clouds',
     developerDebugMode: 'Developer Debug Mode',
     developerDebugWarning:
       'Debug mode skips loading/menu screens and auto-joins the most recent world on each launch. Continue?',

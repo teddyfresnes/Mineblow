@@ -139,6 +139,8 @@ export class StartMenu {
   private readonly developerDebugModeToggleButton = document.createElement('button');
   private readonly renderDistanceSlider = document.createElement('input');
   private readonly renderDistanceValue = document.createElement('div');
+  private readonly waterAnimationToggleButton = document.createElement('button');
+  private readonly cloudsToggleButton = document.createElement('button');
   private readonly statsTitleHost = document.createElement('div');
   private readonly statsList = document.createElement('div');
   private readonly wardrobeCategorySelect = document.createElement('select');
@@ -498,6 +500,12 @@ export class StartMenu {
           ? overrides.renderDistanceChunks
           : baseSettings.renderDistanceChunks,
       ),
+      animateWater:
+        typeof overrides.animateWater === 'boolean'
+          ? overrides.animateWater
+          : baseSettings.animateWater,
+      showClouds:
+        typeof overrides.showClouds === 'boolean' ? overrides.showClouds : baseSettings.showClouds,
     };
   }
 
@@ -924,7 +932,33 @@ export class StartMenu {
     sliderLegend.append(minLabel, maxLabel);
     sliderGroup.append(sliderLegend);
 
-    stack.append(sliderGroup);
+    const waterToggleGroup = document.createElement('div');
+    waterToggleGroup.className = 'performance-toggle-group';
+    this.waterAnimationToggleButton.type = 'button';
+    this.waterAnimationToggleButton.className = 'menu-button settings-compact-button';
+    this.waterAnimationToggleButton.addEventListener('click', () => {
+      this.settings = this.createSettingsSnapshot({
+        animateWater: !this.settings.animateWater,
+      });
+      this.renderPerformanceView();
+      this.emitSettingsChange();
+    });
+    waterToggleGroup.append(this.waterAnimationToggleButton);
+
+    const cloudsToggleGroup = document.createElement('div');
+    cloudsToggleGroup.className = 'performance-toggle-group';
+    this.cloudsToggleButton.type = 'button';
+    this.cloudsToggleButton.className = 'menu-button settings-compact-button';
+    this.cloudsToggleButton.addEventListener('click', () => {
+      this.settings = this.createSettingsSnapshot({
+        showClouds: !this.settings.showClouds,
+      });
+      this.renderPerformanceView();
+      this.emitSettingsChange();
+    });
+    cloudsToggleGroup.append(this.cloudsToggleButton);
+
+    stack.append(sliderGroup, waterToggleGroup, cloudsToggleGroup);
     frame.append(stack);
 
     const footer = document.createElement('div');
@@ -1573,6 +1607,12 @@ export class StartMenu {
       `${this.settings.renderDistanceChunks} chunks`,
     );
     this.renderDistanceValue.textContent = `${this.settings.renderDistanceChunks} chunks`;
+    this.waterAnimationToggleButton.textContent = `${this.t('waterAnimation')}: ${
+      this.settings.animateWater ? this.t('stateOn') : this.t('stateOff')
+    }`;
+    this.cloudsToggleButton.textContent = `${this.t('clouds')}: ${
+      this.settings.showClouds ? this.t('stateOn') : this.t('stateOff')
+    }`;
   }
 
   private renderLanguageView(): void {

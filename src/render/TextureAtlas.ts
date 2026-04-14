@@ -48,6 +48,7 @@ export interface AnimationPlaybackState {
 }
 
 interface AnimatedTileState {
+  key: TileKey;
   image: HTMLImageElement;
   frameSize: number;
   offset: { x: number; y: number };
@@ -55,7 +56,9 @@ interface AnimatedTileState {
   timelineIndex: number;
   ticksIntoFrame: number;
   tickAccumulator: number;
+  initialFrame: number;
   currentFrame: number;
+  animationEnabled: boolean;
 }
 
 const TILE_SIZE = 16;
@@ -98,6 +101,7 @@ const tileKeys = [
 ] as const;
 
 type TileKey = (typeof tileKeys)[number];
+const WATER_TILE_KEYS = new Set<TileKey>(['water_still', 'water_flow']);
 
 const BLOCK_TEXTURES: Record<TileKey, TileAssetDefinition> = {
   grass_top: {
@@ -381,6 +385,7 @@ export class TextureAtlas {
   private readonly texture: CanvasTexture;
   private readonly context: CanvasRenderingContext2D;
   private readonly animatedTiles: AnimatedTileState[] = [];
+  private waterAnimationEnabled = true;
 
   constructor() {
     const canvas = document.createElement('canvas');
@@ -433,6 +438,9 @@ export class TextureAtlas {
 
     let changed = false;
     for (const tile of this.animatedTiles) {
+      if (!tile.animationEnabled) {
+        continue;
+      }
       tile.tickAccumulator += dtSeconds / MINECRAFT_TICK_SECONDS;
 
       const wholeTicks = Math.floor(tile.tickAccumulator);
@@ -457,6 +465,28 @@ export class TextureAtlas {
         continue;
       }
 
+      this.drawAnimationFrame(tile);
+      changed = true;
+    }
+
+    if (changed) {
+      this.texture.needsUpdate = true;
+    }
+  }
+
+  setWaterAnimationEnabled(enabled: boolean): void {
+    this.waterAnimationEnabled = enabled;
+    let changed = false;
+    for (const tile of this.animatedTiles) {
+      if (!WATER_TILE_KEYS.has(tile.key) || tile.animationEnabled === enabled) {
+        continue;
+      }
+
+      tile.animationEnabled = enabled;
+      tile.timelineIndex = 0;
+      tile.ticksIntoFrame = 0;
+      tile.tickAccumulator = 0;
+      tile.currentFrame = tile.initialFrame;
       this.drawAnimationFrame(tile);
       changed = true;
     }
@@ -504,6 +534,7 @@ export class TextureAtlas {
           const timeline = resolveAnimationTimeline(frameCount, parsed);
           const initialFrame = timeline[0]?.index ?? 0;
           const animated: AnimatedTileState = {
+            key,
             image,
             frameSize,
             offset,
@@ -511,7 +542,9 @@ export class TextureAtlas {
             timelineIndex: 0,
             ticksIntoFrame: 0,
             tickAccumulator: 0,
+            initialFrame,
             currentFrame: initialFrame,
+            animationEnabled: !WATER_TILE_KEYS.has(key) || this.waterAnimationEnabled,
           };
           this.animatedTiles.push(animated);
           this.drawAnimationFrame(animated);

@@ -117,6 +117,12 @@ const hydrateSettings = (value: unknown): GameSettings | null => {
     renderDistanceChunks: normalizeRenderDistanceChunks(
       candidate.renderDistanceChunks ?? DEFAULT_RENDER_DISTANCE_CHUNKS,
     ),
+    animateWater:
+      typeof candidate.animateWater === 'boolean'
+        ? candidate.animateWater
+        : defaults.animateWater,
+    showClouds:
+      typeof candidate.showClouds === 'boolean' ? candidate.showClouds : defaults.showClouds,
   };
 };
 
@@ -481,6 +487,8 @@ export class SaveRepository {
         renderDistanceChunks: normalizeRenderDistanceChunks(
           settings.renderDistanceChunks ?? DEFAULT_RENDER_DISTANCE_CHUNKS,
         ),
+        animateWater: settings.animateWater ?? true,
+        showClouds: settings.showClouds ?? true,
       };
     }
 

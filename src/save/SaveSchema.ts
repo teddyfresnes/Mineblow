@@ -275,7 +275,9 @@ export const isStoredSettings = (value: unknown): value is StoredSettings => {
     (typeof candidate.developerDebugMode === 'boolean' ||
       typeof candidate.developerDebugMode === 'undefined') &&
     (typeof candidate.renderDistanceChunks === 'undefined' ||
-      isRenderDistanceChunks(candidate.renderDistanceChunks))
+      isRenderDistanceChunks(candidate.renderDistanceChunks)) &&
+    (typeof candidate.animateWater === 'boolean' || typeof candidate.animateWater === 'undefined') &&
+    (typeof candidate.showClouds === 'boolean' || typeof candidate.showClouds === 'undefined')
   );
 };
 

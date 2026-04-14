@@ -35,6 +35,8 @@ export interface GameSettings {
   language: UiLanguage;
   developerDebugMode: boolean;
   renderDistanceChunks: number;
+  animateWater: boolean;
+  showClouds: boolean;
 }
 
 export const DEFAULT_INTERFACE_SIZE = 5;
@@ -74,6 +76,8 @@ export const createDefaultSettings = (): GameSettings => ({
   language: DEFAULT_UI_LANGUAGE,
   developerDebugMode: false,
   renderDistanceChunks: DEFAULT_RENDER_DISTANCE_CHUNKS,
+  animateWater: true,
+  showClouds: true,
 });
 
 export const normalizeInterfaceSize = (value: number): number => {

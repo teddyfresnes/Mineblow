@@ -285,6 +285,7 @@ export class Renderer {
   private chunkEdgeFadeBoundsInitialized = false;
   private renderDistanceChunks: number = WORLD_CONFIG.loadRadius;
   private fogDistanceScale = 1;
+  private cloudsEnabled = true;
   private handAnimationProfile: FirstPersonAnimationProfile = { ...HAND_ANIMATION_PROFILE };
   private skinRequestId = 0;
 
@@ -521,7 +522,9 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     cameraPosition: { x: number; y: number; z: number },
     world: World,
   ): void {
-    this.clouds.update(cameraPosition.x, cameraPosition.y, cameraPosition.z);
+    if (this.cloudsEnabled) {
+      this.clouds.update(cameraPosition.x, cameraPosition.y, cameraPosition.z);
+    }
     this.rain.update(dt, this.camera, world);
   }
 
@@ -866,7 +869,7 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.underwaterEnabled = enabled;
     this.underwaterDepth = depth;
     this.sky.group.visible = !enabled;
-    this.clouds.group.visible = !enabled;
+    this.syncCloudVisibility();
     this.rain.group.visible = !enabled;
     if (!enabled) {
       this.waterSurfaceLineStrength = 0;
@@ -990,6 +993,15 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.atlas.update(dt);
   }
 
+  setWaterAnimationEnabled(enabled: boolean): void {
+    this.atlas.setWaterAnimationEnabled(enabled);
+  }
+
+  setCloudsEnabled(enabled: boolean): void {
+    this.cloudsEnabled = enabled;
+    this.syncCloudVisibility();
+  }
+
   setMiningOverlay(hit: VoxelHit | null, progress: number): void {
     if (!hit || progress <= 0) {
       this.miningOverlay.visible = false;
@@ -1047,6 +1059,10 @@ diffuseColor.a = min(1.0, diffuseColor.a + waterTopSurfaceOpacity + waterSurface
     this.handModel = createFirstPersonHand(skin.texture, skin.model);
     this.handRig.add(this.handModel);
     this.handModel.visible = this.heldBlockId === null;
+  }
+
+  private syncCloudVisibility(): void {
+    this.clouds.group.visible = this.cloudsEnabled && !this.underwaterEnabled;
   }
 
   private createDroppedItemGeometry(blockId: BlockId): BoxGeometry {

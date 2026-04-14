@@ -96,16 +96,20 @@ describe('SaveRepository', () => {
     });
   });
 
-  it('persists render distance in settings', async () => {
+  it('persists performance settings', async () => {
     const repository = new SaveRepository();
     await repository.clear();
 
     const settings = createDefaultSettings();
     settings.renderDistanceChunks = 12;
+    settings.animateWater = false;
+    settings.showClouds = false;
 
     await repository.saveSettings(settings);
 
     const loaded = await repository.loadSettings();
     expect(loaded.renderDistanceChunks).toBe(12);
+    expect(loaded.animateWater).toBe(false);
+    expect(loaded.showClouds).toBe(false);
   });
 });

@@ -401,6 +401,8 @@ export class Game {
 
     this.settings = settings;
     this.renderer.setRenderDistanceChunks(this.settings.renderDistanceChunks);
+    this.renderer.setWaterAnimationEnabled(this.settings.animateWater);
+    this.renderer.setCloudsEnabled(this.settings.showClouds);
     setCurrentLanguage(this.settings.language);
     this.applyInterfaceZoom(this.settings.interfaceSize);
     this.globalStats = globalStats;
@@ -2774,6 +2776,8 @@ export class Game {
       language: settings.language,
       developerDebugMode: settings.developerDebugMode,
       renderDistanceChunks: normalizeRenderDistanceChunks(settings.renderDistanceChunks),
+      animateWater: settings.animateWater,
+      showClouds: settings.showClouds,
     };
     setCurrentLanguage(this.settings.language);
     this.applyInterfaceZoom(this.settings.interfaceSize);
@@ -2788,6 +2792,8 @@ export class Game {
     }
     this.session?.world.setRenderDistanceChunks(this.settings.renderDistanceChunks);
     this.renderer.setRenderDistanceChunks(this.settings.renderDistanceChunks);
+    this.renderer.setWaterAnimationEnabled(this.settings.animateWater);
+    this.renderer.setCloudsEnabled(this.settings.showClouds);
     this.renderer.setPlayerSkin(this.settings.skinDataUrl);
     void this.saveRepository.saveSettings(this.settings);
     if (this.inventoryScreen.isVisible()) {
